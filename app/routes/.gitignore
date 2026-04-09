@@ -1,0 +1,174 @@
+# -------------------------------------------------------------------
+
+# Global Ignores (Applies to all languages/frameworks)
+
+# -------------------------------------------------------------------
+ 
+# Operating System files
+
+.DS_Store
+
+Thumbs.db
+
+Desktop.ini
+ 
+# Editor/IDE specific files
+
+.vscode/
+
+.idea/
+
+*.sublime-project
+
+*.sublime-workspace
+
+*.swp
+
+*.swo
+ 
+# Log and temporary files
+
+*.log
+
+*.tmp
+
+temp/
+
+tmp/
+ 
+# Sensitive information/configuration
+
+.env
+
+.env.local
+
+.env.development.local
+
+.env.test.local
+
+.env.production.local
+
+credentials.json
+ 
+# -------------------------------------------------------------------
+
+# Node.js / React / Next.js Specific Ignores
+
+# -------------------------------------------------------------------
+ 
+# Node.js modules
+
+node_modules/
+
+npm-debug.log
+
+yarn-debug.log
+
+yarn-error.log
+ 
+# Build artifacts for React/Next.js
+
+.next/           # Next.js build output
+
+out/             # Next.js export output
+
+build/           # Standard React build output
+ 
+# Next.js specific files
+
+.next/cache/
+
+.next/server/
+
+.next/static/
+ 
+# Environment files
+
+.env.local
+
+.env.*.local
+ 
+# npm/yarn cache
+
+.eslintcache
+
+.stylelintcache
+ 
+# Cypress/Playwright
+
+cypress/videos/
+
+cypress/screenshots/
+
+playwright-report/
+ 
+# -------------------------------------------------------------------
+
+# Python / Flask Specific Ignores
+
+# -------------------------------------------------------------------
+ 
+# Byte-code files
+
+*.pyc
+
+__pycache__/
+
+*.pyd
+
+*.pyo
+ 
+# Distribution / build files
+
+.Python
+
+env/
+
+venv/
+
+*.egg-info/
+
+.coverage
+
+.tox/
+
+dist/
+
+build/
+
+*.whl
+ 
+# Virtual environments
+
+.venv/
+
+env/
+
+venv/
+
+virtualenv/
+
+.virtual_documents/
+ 
+# Editors
+
+.ropeproject
+
+.dmypy.json
+
+dmypy.json
+ 
+# PyCharm
+
+.idea/
+
+.vscode/ # Although also covered in global, good to re-iterate for Python
+
+.history/
+ 
+# Flask-specific
+
+instance/  # For Flask instance folder (often contains database, config)
+
+*.sqlite   # Example for SQLite database files
+ 
