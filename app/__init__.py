@@ -84,6 +84,8 @@ def create_app(config_class=Config):
     db.init_app(app)
     jwt.init_app(app)
     session.init_app(app)
+    mail.init_app(app)
+    email_service.init_app(app)
    
     # Correction automatique des index MongoDB problématiques au démarrage
     with app.app_context():

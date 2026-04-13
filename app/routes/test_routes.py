@@ -8,6 +8,9 @@ from bson import ObjectId
 from bson.errors import InvalidId
 import logging
  
+# Configuration du logger pour ce module
+logger = logging.getLogger(__name__)
+ 
 
 # Import avec gestion d'erreur pour éviter les conflits avec le module standard 'test'
 # Ces imports peuvent échouer, donc on les fait dans un try/except global
@@ -682,6 +685,7 @@ def verify_test_access(test_id):
         phone = (data.get("phone") or "").strip()
  
         logger.debug(f"[START] Accès test {test_id} demandé par {ip}")
+        print(f"DEBUG: [START] verify_test_access for {test_id}, email={email}")
  
         # =====================
         # RATE LIMIT
@@ -799,7 +803,7 @@ def verify_test_access(test_id):
             }), 404
  
         if str(candidature.id) not in group.candidate_ids or group.formation != test.referentiel:
-            logger.warning(f"[NOT IN GROUP] candidate_id={candidature.id}, group={group._id}")
+            logger.warning(f"[NOT IN GROUP] candidate_id={candidature.id}, group={group.id}")
             log_access_async(False, email, test_id, "not_in_group", ip)
             return jsonify({
                 "success": False,
@@ -851,6 +855,9 @@ def verify_test_access(test_id):
  
        
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"DEBUG: [INTERNAL ERROR] {str(e)}")
         # Logger l'erreur interne avec email si disponible
         logger.error(f"[INTERNAL ERROR] email={email}, test_id={test_id}, IP={ip}, error={e}")
         return jsonify({
@@ -895,14 +902,10 @@ import threading
 def log_access_async(success, email, test_id, reason=None, ip=None):
     def _log():
         try:
-            ConnectionLog(
-                email=email,
-                testId=str(test_id),
-                status="success" if success else "failed",
-                reason=reason,
-                ip=ip,
-                loggedAt=datetime.utcnow()
-            ).save()
+            # ConnectionLog est un EmbeddedDocument dans test.py, on ne peut pas le sauver seul
+            # Pour l'instant on se contente d'un log standard
+            status = "success" if success else "failed"
+            logger.info(f"CONNEXION TEST: {email} | Test: {test_id} | Status: {status} | Reason: {reason} | IP: {ip}")
         except Exception:
             pass  # ne jamais casser l'app
  
