@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from app.models.candidature import Candidature
 from mongoengine.errors import NotUniqueError, ValidationError, DoesNotExist
 from datetime import datetime
@@ -27,14 +27,15 @@ def apply():
 
     for field in required_fields:
       if field not in data:
+        current_app.logger.error(f"Validation error: {field} is missing from payload")
         return jsonify(error=f"Le champ {field} est requis"), 400
     
       if field in boolean_fields:
-         if not isinstance(data[field], bool):
-            return jsonify(error=f"Le champ {field} doit être un booléen"), 400
-    else:
-        if not data[field]:
-            return jsonify(error=f"Le champ {field} est requis"), 400
+        if not isinstance(data.get(field), bool):
+          return jsonify(error=f"Le champ {field} doit être un booléen"), 400
+      else:
+        if not data.get(field):
+          return jsonify(error=f"Le champ {field} est requis"), 400
 
     try:
         # Vérification des doublons avant création

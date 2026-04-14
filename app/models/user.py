@@ -34,6 +34,17 @@ class StudentProfile(db.EmbeddedDocument):
     cv_file = db.EmbeddedDocumentField(FileField)
     cover_letter_file = db.EmbeddedDocumentField(FileField)
 
+    def to_json(self):
+        return {
+            "institution": self.institution,
+            "education_level": self.education_level,
+            "sector": self.sector,
+            "motivations": self.motivations,
+            "interests": self.interests,
+            "cv_file": self.cv_file.to_json() if self.cv_file else None,
+            "cover_letter_file": self.cover_letter_file.to_json() if self.cover_letter_file else None
+        }
+
 class StartupProfile(db.EmbeddedDocument):
     company_name = db.StringField(required=True)
     company_sector = db.StringField(required=True)
@@ -46,12 +57,35 @@ class StartupProfile(db.EmbeddedDocument):
     pitch_deck_file = db.EmbeddedDocumentField(FileField)
     business_plan_file = db.EmbeddedDocumentField(FileField)
 
+    def to_json(self):
+        return {
+            "company_name": self.company_name,
+            "company_sector": self.company_sector,
+            "location": self.location,
+            "value_proposition": self.value_proposition,
+            "maturity_stage": self.maturity_stage,
+            "founding_team": self.founding_team,
+            "needs": self.needs,
+            "logo_file": self.logo_file.to_json() if self.logo_file else None,
+            "pitch_deck_file": self.pitch_deck_file.to_json() if self.pitch_deck_file else None,
+            "business_plan_file": self.business_plan_file.to_json() if self.business_plan_file else None
+        }
+
 class CorporateInvestorProfile(db.EmbeddedDocument):
     organization_name = db.StringField(required=True)
     activities = db.StringField(required=True)
     interest_sectors = db.StringField(required=True)
     cooperation_objectives = db.StringField()
     brochure_file = db.EmbeddedDocumentField(FileField)
+
+    def to_json(self):
+        return {
+            "organization_name": self.organization_name,
+            "activities": self.activities,
+            "interest_sectors": self.interest_sectors,
+            "cooperation_objectives": self.cooperation_objectives,
+            "brochure_file": self.brochure_file.to_json() if self.brochure_file else None
+        }
 
 class User(db.Document):
     # Champs d'authentification

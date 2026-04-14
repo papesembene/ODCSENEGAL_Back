@@ -89,8 +89,8 @@ def register():
     user = User(
         email=email,
         profile_type=profile_type,
-        first_name=data.get('firstName', ''),
-        last_name=data.get('lastName', ''),
+        first_name=data.get('first_name') or data.get('firstName', ''),
+        last_name=data.get('last_name') or data.get('lastName', ''),
         is_active=True
     )
     user.set_password(password)
@@ -124,7 +124,7 @@ def register():
         # Créer le profil étudiant
         student_profile = StudentProfile(
             institution=data.get('institution', ''),
-            education_level=data.get('educationLevel', ''),
+            education_level=data.get('education_level') or data.get('educationLevel', ''),
             sector=data.get('sector', ''),
             motivations=data.get('motivations', ''),
             interests=data.get('interests', '')
@@ -149,12 +149,12 @@ def register():
     elif profile_type == 'startup':
         # Créer le profil startup
         startup_profile = StartupProfile(
-            company_name=data.get('companyName', ''),
-            company_sector=data.get('companySector', ''),
+            company_name=data.get('company_name') or data.get('companyName', ''),
+            company_sector=data.get('company_sector') or data.get('companySector', ''),
             location=data.get('location', ''),
-            value_proposition=data.get('valueProposition', ''),
-            maturity_stage=data.get('maturityStage', ''),
-            founding_team=data.get('foundingTeam', ''),
+            value_proposition=data.get('value_proposition') or data.get('valueProposition', ''),
+            maturity_stage=data.get('maturity_stage') or data.get('maturityStage', ''),
+            founding_team=data.get('founding_team') or data.get('foundingTeam', ''),
             needs=data.get('needs', '')
         )
         
@@ -183,10 +183,10 @@ def register():
     elif profile_type in ['corporate', 'investor']:
         # Créer le profil corporate/investor
         corp_profile = CorporateInvestorProfile(
-            organization_name=data.get('organizationName', ''),
+            organization_name=data.get('organization_name') or data.get('organizationName', ''),
             activities=data.get('activities', ''),
-            interest_sectors=data.get('interestSectors', ''),
-            cooperation_objectives=data.get('cooperationObjectives', '')
+            interest_sectors=data.get('interest_sectors') or data.get('interestSectors', ''),
+            cooperation_objectives=data.get('cooperation_objectives') or data.get('cooperationObjectives', '')
         )
         
         # Gestion des fichiers corporate/investor
@@ -308,7 +308,10 @@ def linkedin_callback():
     except Exception as e:
         current_app.logger.error(f"LinkedIn OAuth error: {str(e)}", exc_info=True)
         return redirect(f"{frontend_url}/oauth-callback?error={str(e)}")
+@auth_bp.route('/verify-token', methods=['POST', 'OPTIONS'])
 def verify_token():
+    if request.method == 'OPTIONS':
+        return '', 200
     data = request.get_json()
     
     if not data or 'token' not in data:
@@ -432,6 +435,7 @@ def update_profile():
             # Champs texte
             fields_mapping = {
                 'institution': 'institution',
+                'education_level': 'education_level',
                 'educationLevel': 'education_level',
                 'sector': 'sector',
                 'motivations': 'motivations',
@@ -456,11 +460,16 @@ def update_profile():
 
             # Champs texte
             fields_mapping = {
+                'company_name': 'company_name',
                 'companyName': 'company_name',
+                'company_sector': 'company_sector',
                 'companySector': 'company_sector',
                 'location': 'location',
+                'value_proposition': 'value_proposition',
                 'valueProposition': 'value_proposition',
+                'maturity_stage': 'maturity_stage',
                 'maturityStage': 'maturity_stage',
+                'founding_team': 'founding_team',
                 'foundingTeam': 'founding_team',
                 'needs': 'needs'
             }
@@ -487,9 +496,12 @@ def update_profile():
 
             # Champs texte
             fields_mapping = {
+                'organization_name': 'organization_name',
                 'organizationName': 'organization_name',
                 'activities': 'activities',
+                'interest_sectors': 'interest_sectors',
                 'interestSectors': 'interest_sectors',
+                'cooperation_objectives': 'cooperation_objectives',
                 'cooperationObjectives': 'cooperation_objectives'
             }
 
@@ -514,9 +526,9 @@ def update_profile():
                 'last_name': user.last_name,
                 'profile_type': user.profile_type,
                 'profile_data': {
-                    **(user.student_profile.to_json() if hasattr(user, 'student_profile') and user.student_profile else {}),
-                    **(user.startup_profile.to_json() if hasattr(user, 'startup_profile') and user.startup_profile else {}),
-                    **(user.corporate_investor_profile.to_json() if hasattr(user, 'corporate_investor_profile') and user.corporate_investor_profile else {})
+                    **(user.student_profile.to_json() if user.student_profile else {}),
+                    **(user.startup_profile.to_json() if user.startup_profile else {}),
+                    **(user.corporate_investor_profile.to_json() if user.corporate_investor_profile else {})
                 }
             }
         })
