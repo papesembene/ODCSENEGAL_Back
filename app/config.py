@@ -6,6 +6,7 @@ from datetime import timedelta
 load_dotenv()
 
 class Config:
+    ENVIRONMENT = os.getenv("FLASK_ENV", "development")
     ELASTIC_APM = {
         'SERVICE_NAME': os.getenv('ELASTIC_APM_SERVICE_NAME'),
         'SECRET_TOKEN': os.getenv('ELASTIC_APM_SECRET_TOKEN'),
@@ -45,7 +46,10 @@ class Config:
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
     LINKEDIN_CLIENT_ID = os.getenv('LINKEDIN_CLIENT_ID', '')
     LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET', '')
-    LINKEDIN_REDIRECT_URI = os.getenv('LINKEDIN_REDIRECT_URI','')
+    LINKEDIN_REDIRECT_URI = os.getenv(
+        "LINKEDIN_REDIRECT_URI",
+        "http://localhost:5000/api/auth/linkedin/callback",
+    )
     
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://orangedigitalcenter.sn')
     SESSION_TYPE = 'filesystem'
@@ -59,6 +63,10 @@ class Config:
     MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
     MAIL_DEFAULT_SENDER = os.getenv('MAIL_DEFAULT_SENDER')
     ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+
+    RUN_INDEX_MAINTENANCE = (
+        os.getenv("RUN_INDEX_MAINTENANCE", "false").lower() == "true"
+    )
 
 
    # Dans config.py
@@ -93,3 +101,21 @@ class Config:
     MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
     MAIL_DEFAULT_SENDER = os.getenv('MAIL_DEFAULT_SENDER')
     ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+
+    @classmethod
+    def validate(cls):
+        if cls.ENVIRONMENT != "production":
+            return
+        weak_values = {"", "dev_key", "jwt_dev_key"}
+        missing = []
+        if cls.SECRET_KEY in weak_values:
+            missing.append("SECRET_KEY")
+        if cls.JWT_SECRET_KEY in weak_values:
+            missing.append("JWT_SECRET_KEY")
+        if not os.getenv("MONGO_URI"):
+            missing.append("MONGO_URI")
+        if missing:
+            raise RuntimeError(
+                "Configuration de production invalide: "
+                + ", ".join(missing)
+            )

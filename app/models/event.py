@@ -2,6 +2,10 @@ from datetime import datetime
 from bson.objectid import ObjectId
 from app import db
 import json
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 class Event(db.Document):
     title = db.StringField(required=True)
@@ -10,6 +14,7 @@ class Event(db.Document):
     date = db.DateTimeField(required=True)
     time = db.StringField(required=True)  # Changed to required
     location = db.StringField(required=True)
+    max_participants = db.IntField(default=30, min_value=1)
     agenda = db.StringField(default="")
     speakers = db.ListField(db.DictField())  # Changed to DictField for objects
     details = db.StringField(default="")
@@ -26,6 +31,7 @@ class Event(db.Document):
             "date": self.date.isoformat() if self.date else None,
             "time": self.time,
             "location": self.location,
+            "maxParticipants": self.max_participants,
             "agenda": self.agenda,
             "speakers": self.speakers,
             "details": self.details,
@@ -50,7 +56,7 @@ class Event(db.Document):
                 # Corrige les simples quotes et parse la string en liste de dictionnaires
                 event_data['speakers'] = json.loads(event_data['speakers'].replace("'", '"'))
             except Exception as e:
-                print(f"Erreur lors du parsing des speakers: {e}")
+                logger.warning("Speakers invalides ignorés: %s", e)
                 event_data['speakers'] = []
         elif isinstance(event_data['speakers'], list):
             # Ensure each speaker is a dict
@@ -118,6 +124,7 @@ class Registration(db.Document):
     event_id = db.ReferenceField(Event, required=True)
     email = db.StringField(required=True)
     name = db.StringField()
+    phone = db.StringField()
     registered_at = db.DateTimeField(default=datetime.utcnow)
 
     def to_dict(self):
@@ -126,6 +133,7 @@ class Registration(db.Document):
             "event_id": str(self.event_id.id) if self.event_id else None,
             "email": self.email,
             "name": self.name,
+            "phone": self.phone,
             "registered_at": self.registered_at.isoformat(),
         }
 

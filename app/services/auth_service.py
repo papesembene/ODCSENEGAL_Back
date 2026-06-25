@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class AuthService:
     @staticmethod
     def login_with_email(email, password):
-        user = User.objects(email=email).first()
+        user = User.objects(email=(email or "").strip().lower()).first()
 
         if not user or not user.check_password(password):
             raise Unauthorized("Email ou mot de passe incorrect")
@@ -32,7 +32,7 @@ class AuthService:
         """
         Authentifie un administrateur
         """
-        user = User.objects(email=email).first()
+        user = User.objects(email=(email or "").strip().lower()).first()
 
         if not user or not user.check_password(password):
             raise Unauthorized("Email ou mot de passe incorrect")
@@ -123,7 +123,7 @@ class AuthService:
         'is_admin': user.is_admin if hasattr(user, 'is_admin') else False,
         'admin_type': user.admin_type if hasattr(user, 'admin_type') else None,
         'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + current_app.config['JWT_EXPIRATION_DELTA'],
+        'exp': datetime.utcnow() + expiration_delta,
         'iss': current_app.config.get('JWT_ISSUER', 'your-app-name')
     }
 
@@ -180,7 +180,8 @@ class AuthService:
             'is_active': user.is_active,
             'email_verified': user.email_verified,
             'is_admin': user.is_admin if hasattr(user, 'is_admin') else False,
-            'admin_type': user.admin_type if hasattr(user, 'admin_type') else None
+            'admin_type': user.admin_type if hasattr(user, 'admin_type') else None,
+            'profile_data': user.profile_data if hasattr(user, 'profile_data') and isinstance(user.profile_data, dict) else {},
         }
 
         # Ajouter les données de profil spécifiques

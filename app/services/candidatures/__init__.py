@@ -1,0 +1,1 @@
+"""Candidature domain services."""

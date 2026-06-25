@@ -1,59 +1,85 @@
-from flask import request, jsonify
-from flask_httpauth import HTTPBasicAuth
-from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
 
-auth = HTTPBasicAuth()
+from flask import Blueprint, jsonify, request
 
-# Configuration des identifiants admin (à mettre dans une config sécurisée en production)
-ADMIN_CREDENTIALS = {
-    "admin": generate_password_hash("1234")
-}
+from app.services.events.event_service import EventService, EventServiceError
+from app.utils.auth_decorators import admin_required
 
-@auth.verify_password
-def verify_password(username, password):
-    if username in ADMIN_CREDENTIALS and \
-            check_password_hash(ADMIN_CREDENTIALS.get(username), password):
-        return username
 
-@api.route('/admin/events', methods=['POST'])
-@auth.login_required
-def admin_create_event():
-    data = request.get_json()
+admin_event_bp = Blueprint("admin_event", __name__)
+event_service = EventService()
+ADMIN_TYPES = {"competences", "startups", "super_admin"}
 
-    # Validation des données
-    required_fields = ['title', 'date', 'description', 'category']
-    if not all(field in data for field in required_fields):
-        return jsonify({"error": "Champs manquants"}), 400
-    
+
+def _serialize(event):
+    data = event.to_dict()
+    data.update(
+        {
+            "currentParticipants": data.get("registration_count", 0),
+            "maxParticipants": event.max_participants,
+            "status": (
+                "upcoming"
+                if event.date and event.date >= datetime.utcnow()
+                else "completed"
+            ),
+        }
+    )
+    return data
+
+
+@admin_event_bp.route("/events", methods=["GET"])
+@admin_required(ADMIN_TYPES)
+def list_admin_events():
+    events = [_serialize(event) for event in event_service.list_documents()]
+    return jsonify({"success": True, "data": events}), 200
+
+
+@admin_event_bp.route("/events", methods=["POST"])
+@admin_required(ADMIN_TYPES)
+def create_admin_event():
     try:
-        # Conversion de la date
-        data['date'] = datetime.fromisoformat(data['date'])
+        event = event_service.create(request.get_json() or {})
+        return jsonify(
+            {"success": True, "data": _serialize(event)}
+        ), 201
+    except EventServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), (
+            error.status_code
+        )
 
-        # Valeurs par défaut
-        data.setdefault('time', "14:00")
-        data.setdefault('location', "Orange Digital Center, Dakar")
-        data.setdefault('attendees', 0)
-        data.setdefault('image', "/images/event-default.jpg")
-        
-        # Optionally set other fields like agenda or speakers if provided
-        data.setdefault('agenda', [])
-        data.setdefault('speakers', [])
-        data.setdefault('details', "")
-        
-        # Création de l'événement
-        event_id = Event.create_event(data)
 
-        # Si l'insertion échoue (ex: problème avec la base de données)
-        if not event_id:
-            return jsonify({"error": "Échec de la création de l'événement"}), 500
-        
-        return jsonify({
-            "message": "Événement créé avec succès",
-            "event_id": str(event_id)
-        }), 201
-        
-    except ValueError as e:
-        return jsonify({"error": "Format de date invalide"}), 400
-    except Exception as e:
-        # Catch all for unexpected errors
-        return jsonify({"error": f"Erreur inattendue: {str(e)}"}), 500
+@admin_event_bp.route("/events", methods=["PATCH"])
+@admin_required(ADMIN_TYPES)
+def update_admin_event():
+    data = request.get_json() or {}
+    event_id = data.pop("id", None)
+    if not event_id:
+        return jsonify(
+            {"success": False, "error": "Identifiant requis"}
+        ), 400
+    try:
+        event = event_service.update(event_id, data)
+        return jsonify(
+            {"success": True, "data": _serialize(event)}
+        ), 200
+    except EventServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), (
+            error.status_code
+        )
+
+
+@admin_event_bp.route("/events", methods=["DELETE"])
+@admin_required(ADMIN_TYPES)
+def delete_admin_event():
+    event_id = request.args.get("id")
+    if not event_id:
+        return jsonify(
+            {"success": False, "error": "Identifiant requis"}
+        ), 400
+    try:
+        event_service.delete(event_id)
+        return jsonify({"success": True}), 200
+    except EventServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), (
+            error.status_code
+        )
