@@ -24,6 +24,9 @@ def admin_required(admin_types=None):
     def decorator(view_func):
         @wraps(view_func)
         def wrapped(*args, **kwargs):
+            if request.method == "OPTIONS":
+                return "", 200
+
             try:
                 token = _extract_bearer_token()
                 user = AuthService.verify_token(token)

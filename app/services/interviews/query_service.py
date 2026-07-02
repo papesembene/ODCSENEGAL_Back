@@ -42,6 +42,12 @@ class InterviewQueryService:
                 is_admin=True,
                 is_active=True,
                 admin_type__in=["competences", "super_admin"],
+                profile_data__admin_scope="interview_member",
+                profile_data__interview_role__in=[
+                    "filter",
+                    "validator",
+                    "motivation",
+                ],
             ).order_by("first_name", "last_name")
         occupancy = self._occupancy(slots)
         return {

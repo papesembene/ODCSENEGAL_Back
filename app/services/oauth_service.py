@@ -47,15 +47,16 @@ class GoogleOAuthService:
         )
         state = secrets.token_urlsafe(32)
         session["google_oauth_state"] = state
-        return f"{GoogleOAuthService.AUTHORIZE_URL}?{urlencode({
-            'client_id': current_app.config['GOOGLE_CLIENT_ID'],
-            'redirect_uri': redirect_uri,
-            'response_type': 'code',
-            'scope': 'email profile',
-            'access_type': 'offline',
-            'prompt': 'consent',
-            'state': state,
-        })}"
+        params = {
+            "client_id": current_app.config["GOOGLE_CLIENT_ID"],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "email profile",
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state,
+        }
+        return f"{GoogleOAuthService.AUTHORIZE_URL}?{urlencode(params)}"
 
     @staticmethod
     def validate_state():
@@ -123,13 +124,14 @@ class LinkedInOAuthService:
             )
         state = secrets.token_urlsafe(32)
         session["linkedin_oauth_state"] = state
-        return f"{LinkedInOAuthService.AUTHORIZE_URL}?{urlencode({
-            'client_id': current_app.config['LINKEDIN_CLIENT_ID'],
-            'redirect_uri': redirect_uri,
-            'response_type': 'code',
-            'scope': 'openid profile email',
-            'state': state,
-        })}"
+        params = {
+            "client_id": current_app.config["LINKEDIN_CLIENT_ID"],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid profile email",
+            "state": state,
+        }
+        return f"{LinkedInOAuthService.AUTHORIZE_URL}?{urlencode(params)}"
 
     @staticmethod
     def get_token(code):
