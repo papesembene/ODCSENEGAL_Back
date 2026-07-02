@@ -20,7 +20,7 @@ SCORECARD_SYSTEM_CRITERIA = {
         "interviewer": "text",
         "comment": "textarea",
         "decision": "select",
-        "total_filter": "computed",
+        "total_score": "computed",
     },
     "validator": {
         "interviewer": "text",

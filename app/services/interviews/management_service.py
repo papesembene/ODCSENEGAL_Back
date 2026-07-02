@@ -2,6 +2,9 @@
 
 from datetime import datetime
 
+from mongoengine.connection import ConnectionFailure
+
+from app.models.user import User
 from app.repositories.interview_repository import InterviewRepository
 from app.services.interviews.exceptions import (
     InterviewConflictError,
@@ -87,6 +90,18 @@ class InterviewManagementService:
 
         start_at = self.parse_datetime(data.get("start_at"), "start_at")
         end_at = self.parse_datetime(data.get("end_at"), "end_at")
+        assigned_filter_ids = self._assignment_ids_for_role(
+            data.get("assigned_filter_ids", data.get("assigned_jury_ids", [])),
+            "filter",
+        )
+        assigned_validator_ids = self._assignment_ids_for_role(
+            data.get("assigned_validator_ids", []),
+            "validator",
+        )
+        assigned_motivation_ids = self._assignment_ids_for_role(
+            data.get("assigned_motivation_ids", []),
+            "motivation",
+        )
         slot = self.repository.create_slot(
             campaign_id=data["campaign_id"],
             label=data["label"].strip(),
@@ -94,22 +109,10 @@ class InterviewManagementService:
             start_at=start_at,
             end_at=end_at,
             capacity=int(data.get("capacity", 10) or 10),
-            assigned_filter_ids=data.get(
-                "assigned_filter_ids",
-                data.get("assigned_jury_ids", []),
-            ),
-            assigned_jury_ids=data.get(
-                "assigned_jury_ids",
-                data.get("assigned_filter_ids", []),
-            ),
-            assigned_validator_ids=data.get(
-                "assigned_validator_ids",
-                [],
-            ),
-            assigned_motivation_ids=data.get(
-                "assigned_motivation_ids",
-                [],
-            ),
+            assigned_filter_ids=assigned_filter_ids,
+            assigned_jury_ids=assigned_filter_ids,
+            assigned_validator_ids=assigned_validator_ids,
+            assigned_motivation_ids=assigned_motivation_ids,
             status=data.get("status", "scheduled"),
         )
         slot.updated_at = self.now()
@@ -124,16 +127,25 @@ class InterviewManagementService:
             if field in data:
                 setattr(slot, field, data[field])
 
-        if (
-            "assigned_filter_ids" in data
-            and "assigned_jury_ids" not in data
-        ):
-            slot.assigned_jury_ids = data["assigned_filter_ids"]
-        if (
-            "assigned_jury_ids" in data
-            and "assigned_filter_ids" not in data
-        ):
-            slot.assigned_filter_ids = data["assigned_jury_ids"]
+        if "assigned_filter_ids" in data or "assigned_jury_ids" in data:
+            slot.assigned_filter_ids = self._assignment_ids_for_role(
+                data.get(
+                    "assigned_filter_ids",
+                    data.get("assigned_jury_ids", []),
+                ),
+                "filter",
+            )
+            slot.assigned_jury_ids = slot.assigned_filter_ids
+        if "assigned_validator_ids" in data:
+            slot.assigned_validator_ids = self._assignment_ids_for_role(
+                data["assigned_validator_ids"],
+                "validator",
+            )
+        if "assigned_motivation_ids" in data:
+            slot.assigned_motivation_ids = self._assignment_ids_for_role(
+                data["assigned_motivation_ids"],
+                "motivation",
+            )
 
         if "capacity" in data:
             slot.capacity = int(data["capacity"] or 0)
@@ -150,6 +162,33 @@ class InterviewManagementService:
 
         slot.updated_at = self.now()
         return self.repository.save_slot(slot)
+
+    @staticmethod
+    def _assignment_ids_for_role(user_ids, role):
+        if not user_ids:
+            return []
+
+        normalized_ids = [str(user_id) for user_id in user_ids if user_id]
+        if not normalized_ids:
+            return []
+
+        try:
+            users = User.objects(
+                id__in=normalized_ids,
+                is_admin=True,
+                is_active=True,
+            ).only("id", "profile_data")
+        except ConnectionFailure:
+            return normalized_ids
+
+        allowed_ids = {
+            str(user.id)
+            for user in users
+            if (user.profile_data or {}).get("admin_scope")
+            == "interview_member"
+            and (user.profile_data or {}).get("interview_role") == role
+        }
+        return [user_id for user_id in normalized_ids if user_id in allowed_ids]
 
     @staticmethod
     def parse_datetime(value, field_name):

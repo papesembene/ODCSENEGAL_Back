@@ -145,6 +145,7 @@ class InterviewQueryService:
             "last_name": user.last_name,
             "admin_type": user.admin_type,
             "is_active": user.is_active,
+            "profile_data": user.profile_data or {},
         }
 
     @staticmethod
@@ -226,6 +227,19 @@ class InterviewQueryService:
             evaluation.candidature_id
             for evaluation in evaluation_list
         ]
+        campaign_ids = {
+            evaluation.campaign_id
+            for evaluation in evaluation_list
+            if evaluation.campaign_id
+        }
+        campaigns_by_id = {
+            str(campaign.id): campaign
+            for campaign in (
+                InterviewCampaign.objects(id__in=list(campaign_ids))
+                if campaign_ids
+                else []
+            )
+        }
         candidates = (
             Candidature.objects(id__in=candidate_ids)
             if candidate_ids
@@ -258,6 +272,10 @@ class InterviewQueryService:
         payloads = []
         for evaluation in evaluation_list:
             payload = evaluation.to_dict()
+            campaign = campaigns_by_id.get(evaluation.campaign_id)
+            payload["campaign_scorecard_config"] = (
+                campaign.scorecard_config if campaign else {}
+            )
             candidate = candidates_by_id.get(evaluation.candidature_id)
             if not payload.get("candidate_snapshot") and candidate:
                 payload["candidate_snapshot"] = (

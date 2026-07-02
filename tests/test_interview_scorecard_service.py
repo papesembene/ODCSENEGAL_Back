@@ -15,10 +15,29 @@ class InterviewScorecardServiceTest(unittest.TestCase):
         second = get_default_scorecard_config("dev-web-mobile")
 
         self.assertTrue(is_scorecard_ready(first))
+        self.assertIsNotNone(sanitize_scorecard_config(first))
         first["sections"]["filter"]["criteria"][0]["label"] = "Modifié"
         self.assertNotEqual(
             first["sections"]["filter"]["criteria"][0]["label"],
             second["sections"]["filter"]["criteria"][0]["label"],
+        )
+
+    def test_dwm_scorecard_accepts_custom_business_criteria(self):
+        scorecard = get_default_scorecard_config("dev-web-mobile")
+        scorecard["sections"]["filter"]["criteria"].append({
+            "key": "niveau_general",
+            "label": "Niveau général filtre",
+            "type": "number",
+            "required": True,
+            "min": 0,
+            "max": 5,
+        })
+
+        sanitized = sanitize_scorecard_config(scorecard)
+
+        self.assertEqual(
+            "niveau_general",
+            sanitized["sections"]["filter"]["criteria"][-1]["key"],
         )
 
     def test_custom_scorecard_accepts_only_checkbox_and_number(self):
