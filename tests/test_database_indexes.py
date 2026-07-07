@@ -5,6 +5,7 @@ from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
 from app.models.test_violation import TestViolation
+from app.models.portal_content import PortalContent
 
 
 def declared_index_fields(model):
@@ -40,6 +41,13 @@ class DatabaseIndexesTest(unittest.TestCase):
         self.assertIn(("testId", "candidateEmail"), violation_indexes)
         self.assertIn(("testId", "updatedAt"), violation_indexes)
         self.assertIn(("testId", "totalViolations"), violation_indexes)
+
+    def test_portal_content_indexes_cover_public_home_queries(self):
+        indexes = declared_index_fields(PortalContent)
+
+        self.assertIn(("status", "type", "placement", "priority", "created_at"), indexes)
+        self.assertIn(("status",), indexes)
+        self.assertIn(("type",), indexes)
 
 
 if __name__ == "__main__":
