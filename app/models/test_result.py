@@ -32,7 +32,10 @@ class TestResult(Document):
             'candidate.email',
             'referentiel',
             'status',
-            'completedAt'
+            'completedAt',
+            {'fields': ['testId', 'status', '-completedAt']},
+            {'fields': ['referentiel', 'status', '-completedAt']},
+            {'fields': ['candidate.email', '-completedAt']},
         ]
     }
 

@@ -62,6 +62,34 @@ def create_test_group():
         }), 500
 
 
+@test_group_bp.route("/test-groups/available-candidates", methods=["GET"])
+@admin_required({"competences", "super_admin"})
+def get_available_group_candidates():
+    try:
+        page = max(request.args.get("page", default=1, type=int), 1)
+        per_page = min(
+            max(request.args.get("per_page", default=100, type=int), 1),
+            200,
+        )
+        payload = test_group_service.list_available_candidates(
+            formation=request.args.get("formation", ""),
+            search=request.args.get("search", ""),
+            page=page,
+            per_page=per_page,
+        )
+        return jsonify({"success": True, **payload}), 200
+    except TestGroupServiceError as error:
+        return group_error_response(error)
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Erreur lors de la récupération des candidats "
+                f"disponibles : {error}"
+            ),
+        }), 500
+
+
 @test_group_bp.route("/test-groups/<group_id>", methods=["GET"])
 @admin_required({"competences", "super_admin"})
 def get_test_group(group_id):

@@ -1,6 +1,7 @@
 """Anti-cheat violation use cases."""
 
 from app.models.test_violation import TestViolation
+from app.services.tests.test_access_service import SlidingWindowRateLimiter
 
 
 class TestViolationServiceError(Exception):
@@ -10,6 +11,12 @@ class TestViolationServiceError(Exception):
 
 
 class TestViolationService:
+    rate_limiter = SlidingWindowRateLimiter(
+        limit=120,
+        window=60,
+        max_keys=50000,
+    )
+
     @staticmethod
     def log(test_id, data):
         data = data or {}
@@ -19,6 +26,13 @@ class TestViolationService:
         if not candidate_email or not violation_type or not message:
             raise TestViolationServiceError(
                 "Email, type et message sont requis"
+            )
+        if TestViolationService.rate_limiter.is_limited(
+            f"{test_id}:{candidate_email}",
+        ):
+            raise TestViolationServiceError(
+                "Trop d'événements anti-triche reçus, réessayez dans un instant",
+                429,
             )
         violation = TestViolation.objects(
             testId=str(test_id),

@@ -35,7 +35,16 @@ class Candidature(Document):
     
 
     meta = {
-        'indexes': ['email']  # Indexer l'email pour des recherches rapides
+        'indexes': [
+            'email',
+            'phone',
+            'cni_or_passport_number',
+            'desired_training',
+            'status',
+            '-created_at',
+            {'fields': ['desired_training', '-created_at']},
+            {'fields': ['desired_training', 'status', '-created_at']},
+        ]
     }
 
     def to_dict(self):

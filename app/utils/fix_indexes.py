@@ -12,6 +12,39 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def ensure_critical_indexes():
+    """
+    Force la synchronisation des index MongoEngine critiques.
+
+    Cette opération crée les index manquants, sans supprimer de données.
+    Elle peut être lancée au démarrage de maintenance ou via un script dédié.
+    """
+    from app.models.candidature import Candidature
+    from app.models.test import Test
+    from app.models.test_group import TestGroup
+    from app.models.test_result import TestResult
+    from app.models.test_violation import TestViolation
+
+    models = (
+        Candidature,
+        Test,
+        TestGroup,
+        TestResult,
+        TestViolation,
+    )
+    ensured = []
+
+    for model in models:
+        model.ensure_indexes()
+        ensured.append(model._get_collection_name())
+
+    logger.info(
+        "Index critiques synchronisés: %s",
+        ", ".join(ensured),
+    )
+    return ensured
+
 def fix_problematic_indexes():
     """
     Supprime les index MongoDB qui référencent des champs inexistants
@@ -101,4 +134,3 @@ def fix_problematic_indexes():
     except Exception as e:
         logger.error(f"Erreur lors de la correction des index: {str(e)}")
         return 0
-

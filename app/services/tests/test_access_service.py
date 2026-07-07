@@ -178,9 +178,35 @@ class TestAccessService:
         self.access_logger = access_logger or AsyncAccessLogger()
 
     def verify(self, test_id, email, phone, ip):
+        access = self._verify_candidate_access(
+            test_id=test_id,
+            email=email,
+            phone=phone,
+            ip=ip,
+            rate_limit_prefix="access",
+        )
+        self.access_logger.enqueue({
+            "status": "success",
+            "email": access["candidate"]["email"],
+            "test_id": access["test"]["id"],
+            "candidate_id": access["candidate"]["id"],
+            "ip": ip,
+        })
+        return access
+
+    def _verify_candidate_access(
+        self,
+        test_id,
+        email,
+        phone,
+        ip,
+        rate_limit_prefix,
+    ):
         email = (email or "").strip().lower()
         phone = (phone or "").strip()
-        if self.rate_limiter.is_limited(f"{ip}:{email or 'unknown'}"):
+        if self.rate_limiter.is_limited(
+            f"{rate_limit_prefix}:{ip}:{email or 'unknown'}",
+        ):
             raise TestAccessError(
                 "⏳ Trop de tentatives, réessayez plus tard",
                 429,
@@ -254,13 +280,6 @@ class TestAccessService:
             )
 
         self._validate_time_window(test)
-        self.access_logger.enqueue({
-            "status": "success",
-            "email": email,
-            "test_id": str(test.id),
-            "candidate_id": str(candidature.id),
-            "ip": ip,
-        })
         return {
             "candidate": {
                 "id": str(candidature.id),
@@ -291,6 +310,15 @@ class TestAccessService:
             ),
             "status": test.status,
         }
+
+    def validate_submission(self, test_id, email, phone, ip="submission"):
+        return self._verify_candidate_access(
+            test_id=test_id,
+            email=email,
+            phone=phone,
+            ip=ip,
+            rate_limit_prefix="submit",
+        )
 
     @staticmethod
     def update_status(test_id):

@@ -30,7 +30,17 @@ class TestGroup(Document):
     
     meta = {
         'collection': 'test_groups',
-        'indexes': ['formation', 'test_date', 'status', 'created_at']
+        'indexes': [
+            'formation',
+            'test_id',
+            'candidate_ids',
+            'test_date',
+            'status',
+            'created_at',
+            {'fields': ['formation', 'status', '-created_at']},
+            {'fields': ['formation', 'status', 'candidate_ids']},
+            {'fields': ['test_id', 'status']},
+        ]
     }
     
     def to_dict(self):

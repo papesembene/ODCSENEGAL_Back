@@ -1,3 +1,6 @@
+import secrets
+import string
+
 from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import BadRequest, Unauthorized
 from werkzeug.security import generate_password_hash
@@ -8,6 +11,7 @@ from app.services.admin import (
 )
 from app.services.auth_service import AuthService
 from app.models.user import User
+from app.models.interview import InterviewSlot
 from app.utils.auth_decorators import admin_required
 
 
@@ -18,6 +22,52 @@ INTERVIEW_ROLE_LABELS = {
     "validator": "Validation",
     "motivation": "Motivation",
 }
+
+
+def _generate_temporary_password(length=12):
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _serialize_interview_member(user):
+    profile_data = user.profile_data or {}
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "is_active": user.is_active,
+        "role": profile_data.get("interview_role"),
+        "role_label": INTERVIEW_ROLE_LABELS.get(
+            profile_data.get("interview_role"),
+            profile_data.get("interview_role") or "-",
+        ),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+def _interview_member_query():
+    return User.objects(
+        is_admin=True,
+        admin_type="competences",
+        __raw__={"profile_data.admin_scope": "interview_member"},
+    )
+
+
+def _member_has_slot_assignments(member_id):
+    member_id = str(member_id)
+    return bool(
+        InterviewSlot.objects(
+            __raw__={
+                "$or": [
+                    {"assigned_filter_ids": member_id},
+                    {"assigned_jury_ids": member_id},
+                    {"assigned_validator_ids": member_id},
+                    {"assigned_motivation_ids": member_id},
+                ]
+            },
+        ).only("id").first()
+    )
 
 
 def _login_error_message(error):
@@ -140,12 +190,29 @@ def get_dashboard_statistics():
             ), 500
 
 
-@admin_bp.route("/interview-members", methods=["POST", "OPTIONS"])
+@admin_bp.route("/interview-members", methods=["GET", "POST", "OPTIONS"])
 @admin_required({"competences", "super_admin"})
 def create_interview_member():
     try:
         if request.method == "OPTIONS":
             return "", 200
+        if request.method == "GET":
+            role = (request.args.get("role") or "").strip()
+            query = _interview_member_query()
+            if role in INTERVIEW_ROLE_LABELS:
+                query = query.filter(
+                    __raw__={"profile_data.interview_role": role},
+                )
+
+            members = [
+                _serialize_interview_member(user)
+                for user in query.order_by("-created_at")
+            ]
+            return jsonify({
+                "success": True,
+                "data": members,
+                "total": len(members),
+            }), 200
 
         data = request.get_json(silent=True)
         if not data:
@@ -155,7 +222,9 @@ def create_interview_member():
         first_name = (data.get("first_name") or "").strip()
         last_name = (data.get("last_name") or "").strip()
         role = (data.get("role") or "").strip()
-        password = (data.get("password") or "test123").strip()
+        password = (data.get("password") or "").strip()
+        if not password:
+            password = _generate_temporary_password()
 
         if not first_name or not last_name or not email or not role:
             raise BadRequest(
@@ -191,6 +260,7 @@ def create_interview_member():
                 "message": "Membre du jury créé avec succès",
                 "user": AuthService.user_to_safe_json(user),
                 "role_label": INTERVIEW_ROLE_LABELS[role],
+                "temporary_password": password,
             }
         ), 201
     except BadRequest as error:
@@ -205,3 +275,97 @@ def create_interview_member():
                 ),
             }
         ), 500
+
+
+@admin_bp.route("/interview-members/<member_id>", methods=["PATCH", "OPTIONS"])
+@admin_required({"competences", "super_admin"})
+def update_interview_member(member_id):
+    try:
+        if request.method == "OPTIONS":
+            return "", 200
+
+        data = request.get_json(silent=True) or {}
+        user = _interview_member_query().filter(id=member_id).first()
+        if not user:
+            return jsonify({
+                "success": False,
+                "error": "Membre du jury non trouvé",
+            }), 404
+
+        role = (data.get("role") or "").strip()
+        if role:
+            if role not in INTERVIEW_ROLE_LABELS:
+                raise BadRequest("Rôle jury invalide")
+            profile_data = user.profile_data or {}
+            profile_data["interview_role"] = role
+            user.profile_data = profile_data
+
+        if "is_active" in data:
+            user.is_active = bool(data["is_active"])
+
+        first_name = data.get("first_name")
+        last_name = data.get("last_name")
+        if first_name is not None:
+            user.first_name = first_name.strip()
+        if last_name is not None:
+            user.last_name = last_name.strip()
+
+        user.save()
+        return jsonify({
+            "success": True,
+            "message": "Membre du jury mis à jour",
+            "data": _serialize_interview_member(user),
+        }), 200
+    except BadRequest as error:
+        return jsonify({"success": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Erreur lors de la mise à jour du membre du jury: "
+                f"{error}"
+            ),
+        }), 500
+
+
+@admin_bp.route("/interview-members/<member_id>", methods=["DELETE", "OPTIONS"])
+@admin_required({"competences", "super_admin"})
+def delete_interview_member(member_id):
+    try:
+        if request.method == "OPTIONS":
+            return "", 200
+
+        user = _interview_member_query().filter(id=member_id).first()
+        if not user:
+            return jsonify({
+                "success": False,
+                "error": "Membre du jury non trouvé",
+            }), 404
+
+        if _member_has_slot_assignments(member_id):
+            user.is_active = False
+            user.save()
+            return jsonify({
+                "success": True,
+                "message": (
+                    "Ce membre est déjà affecté à un créneau. "
+                    "Il a été désactivé pour préserver l'historique."
+                ),
+                "data": _serialize_interview_member(user),
+                "deleted": False,
+            }), 200
+
+        user.delete()
+        return jsonify({
+            "success": True,
+            "message": "Membre du jury supprimé",
+            "deleted": True,
+        }), 200
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Erreur lors de la suppression du membre du jury: "
+                f"{error}"
+            ),
+        }), 500

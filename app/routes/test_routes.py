@@ -171,14 +171,22 @@ def get_result(result_id):
 def submit_result():
     """Soumettre un résultat de test - Optimisé pour 42k candidats avec pics de 10k soumissions"""
     try:
-        result = test_management_service.submit_result(
-            request.get_json() or {},
+        payload = request.get_json() or {}
+        candidate = payload.get("candidate") or {}
+        test_access_service.validate_submission(
+            payload.get("testId"),
+            candidate.get("email"),
+            candidate.get("phone"),
+            request.remote_addr or "unknown",
         )
+        result = test_management_service.submit_result(payload)
         return jsonify({
             'success': True,
             'message': 'Résultat enregistré avec succès',
             'data': result.to_dict()
         }), 201
+    except TestAccessError as error:
+        return build_candidate_error(str(error), error.status_code)
     except TestServiceError as error:
         return test_service_error_response(error)
     except Exception as e:

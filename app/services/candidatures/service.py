@@ -127,16 +127,31 @@ class CandidatureService:
             "Champ non valide pour vérification",
         )
 
-    def list_candidatures(self, desired_training=None, status=None, search=""):
+    def list_candidatures(
+        self,
+        desired_training=None,
+        status=None,
+        search="",
+        page=None,
+        per_page=None,
+    ):
         filters = {}
         if desired_training and desired_training != "all":
             filters["desired_training"] = desired_training
         if status and status != "all":
             filters["status"] = status
-        candidatures = self.repository.list_filtered(filters, search)
+        candidatures = self.repository.list_filtered(
+            filters,
+            search,
+            page=page,
+            per_page=per_page,
+        )
+        total = self.repository.count_filtered(filters, search)
         return {
             "data": [item.to_dict() for item in candidatures],
-            "total": candidatures.count(),
+            "total": total,
+            "page": page,
+            "per_page": per_page,
         }
 
     def get_candidature(self, candidature_id):

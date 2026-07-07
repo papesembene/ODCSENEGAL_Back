@@ -101,10 +101,19 @@ def check_unique():
 @admin_required({"competences", "super_admin"})
 def get_all_candidatures():
     try:
+        page = request.args.get("page", type=int)
+        per_page = request.args.get("per_page", type=int)
+        if page is not None and page < 1:
+            page = 1
+        if per_page is not None:
+            per_page = min(max(per_page, 1), 200)
+
         result = candidature_service.list_candidatures(
             desired_training=request.args.get("desired_training"),
             status=request.args.get("status"),
             search=request.args.get("search", ""),
+            page=page,
+            per_page=per_page,
         )
         return jsonify({"success": True, **result}), 200
     except Exception as error:

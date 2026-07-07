@@ -130,7 +130,7 @@ class TestManagementService:
             candidate_data,
             ("name", "email", "phone"),
         )
-        candidate_email = candidate_data["email"].strip()
+        candidate_email = candidate_data["email"].strip().lower()
         email_pattern = re.compile(
             f"^{re.escape(candidate_email)}$",
             re.IGNORECASE,

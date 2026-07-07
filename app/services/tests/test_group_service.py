@@ -56,6 +56,43 @@ class TestGroupService:
             raise TestGroupServiceError("Groupe non trouvé", 404)
         return group
 
+    @staticmethod
+    def list_available_candidates(
+        formation,
+        search="",
+        page=1,
+        per_page=100,
+    ):
+        if not formation:
+            raise TestGroupServiceError("Le référentiel est requis")
+
+        assigned_ids = TestGroupService._assigned_candidate_ids(formation)
+        query = Candidature.objects(desired_training=formation)
+        if assigned_ids:
+            query = query.filter(id__nin=list(assigned_ids))
+        if search:
+            regex = {"$regex": search, "$options": "i"}
+            query = query.filter(__raw__={
+                "$or": [
+                    {"first_name": regex},
+                    {"last_name": regex},
+                    {"email": regex},
+                    {"phone": regex},
+                ],
+            })
+
+        total = query.count()
+        offset = max(page - 1, 0) * per_page
+        candidates = query.order_by("-created_at").skip(offset).limit(per_page)
+
+        return {
+            "data": [candidate.to_dict() for candidate in candidates],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "assigned_count": len(assigned_ids),
+        }
+
     def create_group(self, data):
         data = data or {}
         for field in ("name", "formation", "test_date", "candidate_ids"):
@@ -63,12 +100,14 @@ class TestGroupService:
                 raise TestGroupServiceError(
                     f"Le champ {field} est requis"
                 )
-        if Candidature.objects(
-            id__in=data["candidate_ids"],
-        ).count() != len(data["candidate_ids"]):
-            raise TestGroupServiceError(
-                "Certains candidats n'existent pas"
-            )
+        data["candidate_ids"] = self._unique_candidate_ids(
+            data["candidate_ids"],
+        )
+        self._ensure_candidates_exist(data["candidate_ids"])
+        self._ensure_candidates_available(
+            candidate_ids=data["candidate_ids"],
+            formation=data["formation"],
+        )
         try:
             group = TestGroup(
                 name=data["name"],
@@ -93,6 +132,16 @@ class TestGroupService:
     def update_group(self, group_id, data):
         group = self.get_group(group_id)
         data = data or {}
+        if "candidate_ids" in data:
+            data["candidate_ids"] = self._unique_candidate_ids(
+                data["candidate_ids"],
+            )
+            self._ensure_candidates_exist(data["candidate_ids"])
+            self._ensure_candidates_available(
+                candidate_ids=data["candidate_ids"],
+                formation=data.get("formation", group.formation),
+                current_group_id=group.id,
+            )
         if "test_id" in data:
             self._reassign_test(group, data["test_id"])
         for field in self.UPDATE_FIELDS:
@@ -218,6 +267,59 @@ class TestGroupService:
             raise TestGroupServiceError(
                 "Format de date invalide"
             ) from error
+
+    @staticmethod
+    def _unique_candidate_ids(candidate_ids):
+        return list(dict.fromkeys(str(candidate_id) for candidate_id in candidate_ids))
+
+    @staticmethod
+    def _assigned_candidate_ids(formation):
+        assigned_ids = set()
+        groups = TestGroup.objects(
+            formation=formation,
+            status__ne="cancelled",
+        ).only("candidate_ids")
+
+        for group in groups:
+            assigned_ids.update(group.candidate_ids or [])
+
+        return assigned_ids
+
+    @staticmethod
+    def _ensure_candidates_exist(candidate_ids):
+        if Candidature.objects(id__in=candidate_ids).count() != len(candidate_ids):
+            raise TestGroupServiceError(
+                "Certains candidats n'existent pas"
+            )
+
+    @staticmethod
+    def _ensure_candidates_available(
+        candidate_ids,
+        formation,
+        current_group_id=None,
+    ):
+        candidate_id_set = set(candidate_ids)
+        groups = TestGroup.objects(
+            formation=formation,
+            status__ne="cancelled",
+            candidate_ids__in=candidate_ids,
+        ).only("name", "candidate_ids")
+
+        for group in groups:
+            if current_group_id and str(group.id) == str(current_group_id):
+                continue
+
+            duplicated_ids = candidate_id_set.intersection(
+                set(group.candidate_ids or []),
+            )
+            if duplicated_ids:
+                raise TestGroupServiceError(
+                    (
+                        f"{len(duplicated_ids)} candidat(s) sont déjà "
+                        f"affecté(s) au groupe {group.name}."
+                    ),
+                    409,
+                )
 
     @staticmethod
     def _assign_test(group, test_id):

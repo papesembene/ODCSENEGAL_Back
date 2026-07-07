@@ -44,9 +44,13 @@ class TestViolation(Document):
         'indexes': [
             {'fields': ['testId', 'candidateEmail'], 'unique': True},  # Un seul document par test/candidat
             'testId',
+            'testResultId',
             'candidateEmail',
             'totalViolations',
-            'createdAt'
+            'createdAt',
+            {'fields': ['testId', '-updatedAt']},
+            {'fields': ['testId', '-totalViolations']},
+            {'fields': ['candidateEmail', '-updatedAt']},
         ]
     }
    

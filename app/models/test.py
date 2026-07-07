@@ -46,7 +46,15 @@ class Test(Document):
 
     meta = {
         'collection': 'tests',
-        'indexes': ['referentiel', 'status', 'createdAt']
+        'indexes': [
+            'referentiel',
+            'status',
+            'createdAt',
+            'candidatesGroup',
+            {'fields': ['referentiel', 'status']},
+            {'fields': ['status', 'scheduledDate', 'scheduledTime']},
+            {'fields': ['referentiel', '-createdAt']},
+        ]
     }
 
     def to_dict(self):
