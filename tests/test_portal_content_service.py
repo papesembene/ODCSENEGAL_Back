@@ -4,6 +4,7 @@ from app.services.portal_content_service import (
     PortalContentService,
     PortalContentServiceError,
 )
+from app.routes.portal_content_routes import PORTAL_ADMIN_TYPES
 
 
 class PortalContentServiceUnitTest(unittest.TestCase):
@@ -40,6 +41,9 @@ class PortalContentServiceUnitTest(unittest.TestCase):
 
         self.assertEqual(2026, value.year)
         self.assertEqual(12, value.hour)
+
+    def test_portal_admin_roles_are_limited_to_cm(self):
+        self.assertEqual({"cm"}, PORTAL_ADMIN_TYPES)
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ class User(db.Document):
     
     # Admin fields
     is_admin = db.BooleanField(default=False)
-    admin_type = db.StringField(choices=['competences', 'startups', 'super_admin'])  # Type d'administrateur
+    admin_type = db.StringField(choices=['competences', 'startups', 'cm', 'super_admin'])  # Type d'administrateur
     
     # OAuth fields
     oauth_provider = db.StringField()  # 'google', 'linkedin', etc.

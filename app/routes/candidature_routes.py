@@ -1,11 +1,15 @@
 import json
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.services.candidatures.service import (
     CandidatureService,
     CandidatureServiceError,
+)
+from app.services.candidatures.campaign_service import (
+    CandidatureCampaignService,
+    CandidatureCampaignServiceError,
 )
 from app.utils.auth_decorators import admin_required
 from app.utils.request_guards import (
@@ -17,6 +21,7 @@ from app.utils.request_guards import (
 candidature_public_bp = Blueprint("candidature_public", __name__)
 candidature_bp = Blueprint("candidature", __name__)
 candidature_service = CandidatureService()
+candidature_campaign_service = CandidatureCampaignService()
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +30,13 @@ def candidature_error_response(error):
 
 
 def admin_error_response(error):
+    return jsonify({
+        "success": False,
+        "error": str(error),
+    }), error.status_code
+
+
+def campaign_error_response(error):
     return jsonify({
         "success": False,
         "error": str(error),
@@ -43,6 +55,14 @@ def read_submission_payload():
             except json.JSONDecodeError:
                 data = None
     return data
+
+
+@candidature_public_bp.route("/status", methods=["GET"])
+def candidature_status():
+    status = candidature_campaign_service.get_public_status(
+        request.args.get("formation")
+    )
+    return jsonify({"success": True, "data": status}), 200
 
 
 @candidature_public_bp.route("/apply", methods=["POST"])
@@ -124,6 +144,42 @@ def get_all_candidatures():
                 f"{error}"
             ),
         }), 500
+
+
+@candidature_bp.route("/candidature-campaigns", methods=["GET"])
+@admin_required({"competences", "super_admin"})
+def list_candidature_campaigns():
+    campaigns = candidature_campaign_service.list_admin(
+        request.args.get("formation")
+    )
+    return jsonify({"success": True, "data": campaigns}), 200
+
+
+@candidature_bp.route("/candidature-campaigns", methods=["POST"])
+@admin_required({"competences", "super_admin"})
+def create_candidature_campaign():
+    try:
+        campaign = candidature_campaign_service.create(
+            request.get_json(silent=True) or {},
+            admin_email=getattr(g.current_admin, "email", ""),
+        )
+        return jsonify({"success": True, "data": campaign}), 201
+    except CandidatureCampaignServiceError as error:
+        return campaign_error_response(error)
+
+
+@candidature_bp.route("/candidature-campaigns/<campaign_id>", methods=["PATCH"])
+@admin_required({"competences", "super_admin"})
+def update_candidature_campaign(campaign_id):
+    try:
+        campaign = candidature_campaign_service.update(
+            campaign_id,
+            request.get_json(silent=True) or {},
+            admin_email=getattr(g.current_admin, "email", ""),
+        )
+        return jsonify({"success": True, "data": campaign}), 200
+    except CandidatureCampaignServiceError as error:
+        return campaign_error_response(error)
 
 
 @candidature_bp.route(

@@ -5,6 +5,10 @@ from datetime import datetime
 from mongoengine.errors import NotUniqueError, ValidationError
 
 from app.repositories.candidature_repository import CandidatureRepository
+from app.services.candidatures.campaign_service import (
+    CandidatureCampaignService,
+    CandidatureCampaignServiceError,
+)
 from app.utils.request_guards import normalize_email, normalize_phone
 
 
@@ -56,12 +60,14 @@ class CandidatureService:
         "Design UX/UI",
     )
 
-    def __init__(self, repository=None, now=None):
+    def __init__(self, repository=None, now=None, campaign_service=None):
         self.repository = repository or CandidatureRepository()
         self.now = now or datetime.utcnow
+        self.campaign_service = campaign_service or CandidatureCampaignService()
 
     def submit(self, data):
         self._validate_submission(data)
+        self._assert_submission_open(data.get("desired_training"))
         email = normalize_email(data["email"])
         phone = normalize_phone(data["phone"])
 
@@ -105,6 +111,12 @@ class CandidatureService:
                 "existe déjà",
                 409,
             ) from error
+
+    def _assert_submission_open(self, desired_training):
+        try:
+            self.campaign_service.assert_open(desired_training)
+        except CandidatureCampaignServiceError as error:
+            raise CandidatureServiceError(str(error), error.status_code) from error
         except ValidationError as error:
             raise CandidatureServiceError(
                 f"Erreur de validation des données : {error}",

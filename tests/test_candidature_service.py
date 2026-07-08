@@ -29,12 +29,18 @@ class FakeRepository:
         return candidate
 
 
+class FakeCampaignService:
+    def assert_open(self, _formation=None):
+        return None
+
+
 class CandidatureServiceTest(unittest.TestCase):
     def setUp(self):
         self.repository = FakeRepository()
         self.service = CandidatureService(
             repository=self.repository,
             now=lambda: datetime(2026, 6, 25, 8, 0, 0),
+            campaign_service=FakeCampaignService(),
         )
 
     def test_submit_normalizes_contact_data(self):

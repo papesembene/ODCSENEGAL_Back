@@ -51,14 +51,16 @@ def create_admin():
         print("\nType d'administrateur:")
         print("1. Compétences (gestion des formations et tests)")
         print("2. Startups (gestion des startups et programmes)")
-        print("3. Super Admin (accès complet)")
+        print("3. Community Manager (gestion du portail public)")
+        print("4. Super Admin (accès complet)")
         
-        admin_type_choice = input("Votre choix (1/2/3): ").strip()
+        admin_type_choice = input("Votre choix (1/2/3/4): ").strip()
         
         admin_type_map = {
             '1': 'competences',
             '2': 'startups',
-            '3': 'super_admin'
+            '3': 'cm',
+            '4': 'super_admin'
         }
         
         if admin_type_choice not in admin_type_map:
@@ -146,5 +148,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 

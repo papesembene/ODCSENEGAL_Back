@@ -8,6 +8,7 @@ class PortalContent(db.Document):
     STATUSES = ("draft", "published", "archived")
 
     type = db.StringField(required=True, choices=CONTENT_TYPES)
+    slot_key = db.StringField(default="")
     title = db.StringField(required=True, max_length=180)
     summary = db.StringField(default="", max_length=280)
     body = db.StringField(default="")
@@ -32,6 +33,7 @@ class PortalContent(db.Document):
             "type",
             "status",
             "placement",
+            "slot_key",
             "-priority",
             "-created_at",
             {
@@ -50,6 +52,7 @@ class PortalContent(db.Document):
         return {
             "id": str(self.id),
             "type": self.type,
+            "slotKey": self.slot_key,
             "title": self.title,
             "summary": self.summary,
             "body": self.body,

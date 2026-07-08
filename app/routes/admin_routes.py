@@ -23,6 +23,13 @@ INTERVIEW_ROLE_LABELS = {
     "motivation": "Motivation",
 }
 
+ADMIN_TYPE_LABELS = {
+    "competences": "Compétences",
+    "startups": "Startups",
+    "cm": "Community Manager",
+    "super_admin": "Super admin",
+}
+
 
 def _generate_temporary_password(length=12):
     alphabet = string.ascii_letters + string.digits
@@ -52,6 +59,30 @@ def _interview_member_query():
         admin_type="competences",
         __raw__={"profile_data.admin_scope": "interview_member"},
     )
+
+
+def _admin_profile_query():
+    return User.objects(
+        is_admin=True,
+        __raw__={"profile_data.admin_scope": {"$ne": "interview_member"}},
+    )
+
+
+def _serialize_admin_profile(user):
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "admin_type": user.admin_type,
+        "admin_type_label": ADMIN_TYPE_LABELS.get(
+            user.admin_type,
+            user.admin_type or "-",
+        ),
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+    }
 
 
 def _member_has_slot_assignments(member_id):
@@ -188,6 +219,127 @@ def get_dashboard_statistics():
                     ),
                 }
             ), 500
+
+
+@admin_bp.route("/admin-profiles", methods=["GET", "POST", "OPTIONS"])
+@admin_required({"super_admin"})
+def manage_admin_profiles():
+    try:
+        if request.method == "OPTIONS":
+            return "", 200
+        if request.method == "GET":
+            admin_type = (request.args.get("type") or "").strip()
+            query = _admin_profile_query()
+            if admin_type in ADMIN_TYPE_LABELS:
+                query = query.filter(admin_type=admin_type)
+            profiles = [
+                _serialize_admin_profile(user)
+                for user in query.order_by("-created_at")
+            ]
+            return jsonify({
+                "success": True,
+                "data": profiles,
+                "total": len(profiles),
+            }), 200
+
+        data = request.get_json(silent=True) or {}
+        email = (data.get("email") or "").strip().lower()
+        first_name = (data.get("first_name") or "").strip()
+        last_name = (data.get("last_name") or "").strip()
+        admin_type = (data.get("admin_type") or "").strip()
+        password = (data.get("password") or "").strip() or _generate_temporary_password()
+
+        if not email or not first_name or not last_name or not admin_type:
+            raise BadRequest("Prénom, nom, email et profil sont requis")
+        if admin_type not in ADMIN_TYPE_LABELS:
+            raise BadRequest("Profil administrateur invalide")
+        if User.objects(email=email).first():
+            raise BadRequest("Un utilisateur avec cet email existe déjà")
+
+        user = User(
+            email=email,
+            password_hash=generate_password_hash(password),
+            first_name=first_name,
+            last_name=last_name,
+            is_active=True,
+            email_verified=True,
+            is_admin=True,
+            admin_type=admin_type,
+            profile_type="student",
+            profile_data={},
+        )
+        user.save()
+
+        return jsonify({
+            "success": True,
+            "message": "Profil administrateur créé",
+            "data": _serialize_admin_profile(user),
+            "temporary_password": password,
+        }), 201
+    except BadRequest as error:
+        return jsonify({"success": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "error": f"Erreur lors de la gestion des profils: {error}",
+        }), 500
+
+
+@admin_bp.route("/admin-profiles/<profile_id>", methods=["PATCH", "DELETE", "OPTIONS"])
+@admin_required({"super_admin"})
+def manage_admin_profile(profile_id):
+    try:
+        if request.method == "OPTIONS":
+            return "", 200
+
+        user = _admin_profile_query().filter(id=profile_id).first()
+        if not user:
+            return jsonify({
+                "success": False,
+                "error": "Profil administrateur non trouvé",
+            }), 404
+
+        if request.method == "DELETE":
+            user.is_active = False
+            user.save()
+            return jsonify({
+                "success": True,
+                "message": "Profil administrateur désactivé",
+                "data": _serialize_admin_profile(user),
+            }), 200
+
+        data = request.get_json(silent=True) or {}
+        temporary_password = None
+        if data.get("reset_password"):
+            temporary_password = _generate_temporary_password()
+            user.password_hash = generate_password_hash(temporary_password)
+
+        admin_type = (data.get("admin_type") or "").strip()
+        if admin_type:
+            if admin_type not in ADMIN_TYPE_LABELS:
+                raise BadRequest("Profil administrateur invalide")
+            user.admin_type = admin_type
+        if "is_active" in data:
+            user.is_active = bool(data["is_active"])
+        if data.get("first_name") is not None:
+            user.first_name = data.get("first_name", "").strip()
+        if data.get("last_name") is not None:
+            user.last_name = data.get("last_name", "").strip()
+
+        user.save()
+        return jsonify({
+            "success": True,
+            "message": "Mot de passe réinitialisé" if temporary_password else "Profil administrateur mis à jour",
+            "data": _serialize_admin_profile(user),
+            "temporary_password": temporary_password,
+        }), 200
+    except BadRequest as error:
+        return jsonify({"success": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({
+            "success": False,
+            "error": f"Erreur lors de la mise à jour du profil: {error}",
+        }), 500
 
 
 @admin_bp.route("/interview-members", methods=["GET", "POST", "OPTIONS"])

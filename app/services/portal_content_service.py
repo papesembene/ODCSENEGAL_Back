@@ -15,6 +15,7 @@ class PortalContentServiceError(Exception):
 class PortalContentService:
     WRITABLE_FIELDS = {
         "type",
+        "slot_key",
         "title",
         "summary",
         "body",
@@ -32,6 +33,7 @@ class PortalContentService:
 
     FIELD_ALIASES = {
         "imageUrl": "image_url",
+        "slotKey": "slot_key",
         "linkLabel": "link_label",
         "linkUrl": "link_url",
         "isPinned": "is_pinned",

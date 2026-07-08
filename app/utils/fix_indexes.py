@@ -26,6 +26,7 @@ def ensure_critical_indexes():
     from app.models.test_result import TestResult
     from app.models.test_violation import TestViolation
     from app.models.portal_content import PortalContent
+    from app.models.candidature_campaign import CandidatureCampaign
 
     models = (
         Candidature,
@@ -34,6 +35,7 @@ def ensure_critical_indexes():
         TestResult,
         TestViolation,
         PortalContent,
+        CandidatureCampaign,
     )
     ensured = []
 
