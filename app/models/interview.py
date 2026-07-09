@@ -20,6 +20,7 @@ class InterviewCampaign(Document):
         choices=["draft", "active", "closed"],
     )
     scorecard_config = DictField(default=dict)
+    filter_questions = ListField(DictField(), default=list)
     created_by = StringField()
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
@@ -37,6 +38,7 @@ class InterviewCampaign(Document):
             "description": self.description,
             "status": self.status,
             "scorecard_config": self.scorecard_config or {},
+            "filter_questions": self.filter_questions or [],
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -50,6 +52,9 @@ class InterviewSlot(Document):
     start_at = DateTimeField(required=True)
     end_at = DateTimeField(required=True)
     capacity = IntField(default=10)
+    waiting_capacity = IntField(default=0)
+    assignments = DictField(default=dict)
+    availability_responses = DictField(default=dict)
     assigned_filter_ids = ListField(StringField(), default=list)
     assigned_jury_ids = ListField(StringField(), default=list)
     assigned_validator_ids = ListField(StringField(), default=list)
@@ -75,6 +80,9 @@ class InterviewSlot(Document):
             "start_at": self.start_at.isoformat() if self.start_at else None,
             "end_at": self.end_at.isoformat() if self.end_at else None,
             "capacity": self.capacity,
+            "waiting_capacity": self.waiting_capacity,
+            "assignments": self.assignments or {},
+            "availability_responses": self.availability_responses or {},
             "assigned_filter_ids": self.assigned_filter_ids or self.assigned_jury_ids or [],
             "assigned_jury_ids": self.assigned_jury_ids or self.assigned_filter_ids or [],
             "assigned_validator_ids": self.assigned_validator_ids or [],
@@ -90,6 +98,7 @@ class InterviewEvaluation(Document):
     slot_id = StringField()
     candidature_id = StringField(required=True)
     candidate_snapshot = DictField(default=dict)
+    section_reviews = DictField(default=dict)
     filter_review = DictField(default=dict)
     validator_review = DictField(default=dict)
     motivation_review = DictField(default=dict)
@@ -152,6 +161,7 @@ class InterviewEvaluation(Document):
             "slot_id": self.slot_id,
             "candidature_id": self.candidature_id,
             "candidate_snapshot": self.candidate_snapshot or {},
+            "section_reviews": self.section_reviews or {},
             "filter_review": self.filter_review or {},
             "validator_review": self.validator_review or {},
             "motivation_review": self.motivation_review or {},

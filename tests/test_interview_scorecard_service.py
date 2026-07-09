@@ -40,7 +40,7 @@ class InterviewScorecardServiceTest(unittest.TestCase):
             sanitized["sections"]["filter"]["criteria"][-1]["key"],
         )
 
-    def test_custom_scorecard_accepts_only_checkbox_and_number(self):
+    def test_custom_scorecard_accepts_dynamic_business_criteria(self):
         valid_scorecard = self._scorecard([
             {
                 "key": "presence",
@@ -55,31 +55,72 @@ class InterviewScorecardServiceTest(unittest.TestCase):
                 "min": 0,
                 "max": 20,
             },
+            {
+                "key": "question_reponse",
+                "label": "Question posée au candidat",
+                "type": "textarea",
+            },
+            {
+                "key": "avis",
+                "label": "Avis jury",
+                "type": "select",
+                "options": [
+                    {"value": "favorable", "label": "Favorable"},
+                    {"value": "reserve", "label": "Réserve"},
+                ],
+            },
         ])
 
         sanitized = sanitize_scorecard_config(valid_scorecard)
 
         self.assertEqual(
-            ["checkbox", "number"],
+            ["checkbox", "number", "textarea", "select"],
             [
                 criterion["type"]
                 for criterion in sanitized["sections"]["filter"]["criteria"]
             ],
         )
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "case à cocher ou une note",
-        ):
-            sanitize_scorecard_config(
-                self._scorecard([
-                    {
-                        "key": "texte",
-                        "label": "Texte",
-                        "type": "text",
-                    },
-                ]),
-            )
+    def test_custom_scorecard_accepts_referentiel_specific_sections(self):
+        scorecard = {
+            "source": "custom",
+            "sections": {
+                "preselection": {
+                    "title": "Préselection métier",
+                    "roles": ["filter", "validator"],
+                    "criteria": [
+                        {
+                            "key": "portfolio",
+                            "label": "Portfolio présenté",
+                            "type": "checkbox",
+                        },
+                    ],
+                },
+                "coach_review": {
+                    "title": "Avis coach",
+                    "roles": ["validator"],
+                    "criteria": [
+                        {
+                            "key": "comment",
+                            "label": "Commentaire coach",
+                            "type": "textarea",
+                            "required": True,
+                        },
+                    ],
+                },
+            },
+        }
+
+        sanitized = sanitize_scorecard_config(scorecard)
+
+        self.assertEqual(
+            ["preselection", "coach_review"],
+            list(sanitized["sections"].keys()),
+        )
+        self.assertEqual(
+            ["filter", "validator"],
+            sanitized["sections"]["preselection"]["roles"],
+        )
 
     def test_review_sanitizes_numbers_and_computed_values(self):
         section = {
@@ -148,9 +189,11 @@ class InterviewScorecardServiceTest(unittest.TestCase):
             },
         }
         evaluation = {
-            "filter_review": {"presence": False},
-            "validator_review": {"note": 12},
-            "motivation_review": {"comment": "Motivé"},
+            "section_reviews": {
+                "filter": {"presence": False},
+                "validator": {"note": 12},
+                "motivation": {"comment": "Motivé"},
+            },
         }
 
         self.assertTrue(is_evaluation_complete(evaluation, scorecard))

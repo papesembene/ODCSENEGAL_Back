@@ -32,6 +32,13 @@ class InterviewRepository:
     def get_slot(self, slot_id):
         return InterviewSlot.objects(id=slot_id).first()
 
+    def get_slot_by_availability_token(self, token):
+        for slot in InterviewSlot.objects(availability_responses__exists=True):
+            responses = slot.availability_responses or {}
+            if any(item.get("token") == token for item in responses.values()):
+                return slot
+        return None
+
     @staticmethod
     def save_slot(slot):
         slot.save()

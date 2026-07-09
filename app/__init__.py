@@ -108,7 +108,7 @@ def create_app(config_class=Config):
     from app.routes.event_routes import events
     from app.routes.orangefab_routes import orangefab_bp
     from app.routes.test_violation_routes import test_violation_bp
-    from app.routes.interview_routes import interview_bp
+    from app.routes.interview_routes import interview_bp, interview_public_bp
     from app.routes.portal_content_routes import portal_content_bp
    
     from app.routes.test_routes import test_bp
@@ -130,6 +130,7 @@ def create_app(config_class=Config):
     app.register_blueprint(orangefab_bp, url_prefix='/api/orangefab')
     app.register_blueprint(test_violation_bp, url_prefix='/api/admin')
     app.register_blueprint(interview_bp, url_prefix='/api/admin')
+    app.register_blueprint(interview_public_bp, url_prefix='/api/interviews')
     app.register_blueprint(portal_content_bp, url_prefix='/api')
    
     app.register_blueprint(test_bp, url_prefix='/api/admin')

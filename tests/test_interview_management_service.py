@@ -83,6 +83,7 @@ class InterviewManagementServiceTest(unittest.TestCase):
             description="",
             status="draft",
             scorecard_config={},
+            filter_questions=[],
         )
         self.repository.has_evaluations = True
 
@@ -92,6 +93,50 @@ class InterviewManagementServiceTest(unittest.TestCase):
                 {"scorecard_config": {"sections": {}}},
             )
 
+    def test_update_campaign_allows_filter_questions_after_planning(self):
+        self.repository.campaign = SimpleNamespace(
+            name="P8",
+            formation="dev-web-mobile",
+            description="",
+            status="draft",
+            scorecard_config={},
+            filter_questions=[],
+        )
+        self.repository.has_evaluations = True
+
+        campaign = self.service.update_campaign(
+            "campaign-id",
+            {
+                "filter_questions": [
+                    {
+                        "question": " Expliquez votre dernier projet ",
+                        "expected_answer": "Le candidat décrit son rôle et ses choix.",
+                    },
+                    {
+                        "question": "Quelle difficulté avez-vous rencontrée ?",
+                        "expected_answer": "",
+                    },
+                    {"question": "", "expected_answer": "Ignorée"},
+                ],
+            },
+        )
+
+        self.assertEqual(
+            [
+                {
+                    "id": "question_1",
+                    "question": "Expliquez votre dernier projet",
+                    "expected_answer": "Le candidat décrit son rôle et ses choix.",
+                },
+                {
+                    "id": "question_2",
+                    "question": "Quelle difficulté avez-vous rencontrée ?",
+                    "expected_answer": "",
+                },
+            ],
+            campaign.filter_questions,
+        )
+
     def test_create_slot_keeps_filter_and_legacy_jury_in_sync(self):
         slot = self.service.create_slot({
             "campaign_id": "campaign-id",
@@ -100,10 +145,16 @@ class InterviewManagementServiceTest(unittest.TestCase):
             "start_at": "2026-06-24T09:00:00",
             "end_at": "2026-06-24T10:00:00",
             "assigned_filter_ids": ["jury-1"],
+            "assigned_validator_ids": ["jury-1"],
         })
 
         self.assertEqual(["jury-1"], slot.assigned_filter_ids)
         self.assertEqual(["jury-1"], slot.assigned_jury_ids)
+        self.assertEqual(["jury-1"], slot.assigned_validator_ids)
+        self.assertEqual(
+            {"jury-1": ["filter", "validator"]},
+            slot.assignments,
+        )
         self.assertEqual(FIXED_NOW, slot.updated_at)
 
     def test_update_slot_rejects_missing_slot(self):

@@ -12,6 +12,7 @@ from app.utils.auth_decorators import admin_required
 
 
 interview_bp = Blueprint("interview_bp", __name__)
+interview_public_bp = Blueprint("interview_public_bp", __name__)
 management_service = InterviewManagementService()
 query_service = InterviewQueryService()
 evaluation_service = InterviewEvaluationService(query_service=query_service)
@@ -122,6 +123,41 @@ def update_interview_slot(slot_id):
         ), 200
     except InterviewError as error:
         return _error_response(error)
+
+
+@interview_public_bp.route(
+    "/availability/<token>",
+    methods=["GET"],
+)
+def confirm_interview_availability(token):
+    try:
+        response = (request.args.get("response") or "").strip().lower()
+        result = management_service.confirm_jury_availability(
+            token,
+            response,
+        )
+        label = (
+            "disponible"
+            if result["status"] == "available"
+            else "indisponible"
+        )
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<title>Disponibilité enregistrée</title></head>"
+            "<body style='font-family:Arial,sans-serif;padding:32px'>"
+            "<h2>Merci, votre disponibilité a été enregistrée.</h2>"
+            f"<p>Statut déclaré : <strong>{label}</strong>.</p>"
+            "</body></html>"
+        ), 200
+    except InterviewError as error:
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<title>Lien invalide</title></head>"
+            "<body style='font-family:Arial,sans-serif;padding:32px'>"
+            "<h2>Impossible d'enregistrer la disponibilité.</h2>"
+            f"<p>{str(error)}</p>"
+            "</body></html>"
+        ), error.status_code
 
 
 @interview_bp.route("/interviews/evaluations", methods=["GET"])

@@ -4,7 +4,7 @@ from copy import deepcopy
 import re
 
 
-SCORECARD_SECTION_KEYS = ("filter", "validator", "motivation")
+DEFAULT_SCORECARD_SECTION_KEYS = ("filter", "validator", "motivation")
 SCORECARD_CRITERION_TYPES = {
     "text",
     "textarea",
@@ -32,6 +32,33 @@ SCORECARD_SYSTEM_CRITERIA = {
         "comment": "textarea",
     },
 }
+
+COACH_RECOMMENDATION_CRITERIA = [
+    {
+        "key": "coach_pick",
+        "label": "Coup de cœur",
+        "type": "checkbox",
+        "required": False,
+    },
+    {
+        "key": "strong_potential",
+        "label": "Potentiel fort",
+        "type": "checkbox",
+        "required": False,
+    },
+    {
+        "key": "cohort_balance",
+        "label": "Équilibre cohorte",
+        "type": "checkbox",
+        "required": False,
+    },
+    {
+        "key": "social_context",
+        "label": "Cas social à soutenir",
+        "type": "checkbox",
+        "required": False,
+    },
+]
 
 DWM_SCORECARD_CONFIG = {
     "source": "excel",
@@ -104,6 +131,7 @@ DWM_SCORECARD_CONFIG = {
                     "type": "checkbox",
                     "required": False,
                 },
+                *COACH_RECOMMENDATION_CRITERIA,
                 {
                     "key": "verdict",
                     "label": "Verdict",
@@ -194,6 +222,7 @@ def get_default_scorecard_config(formation):
                     "required": True,
                     "system": True,
                 },
+                *deepcopy(COACH_RECOMMENDATION_CRITERIA),
                 {
                     "key": "verdict",
                     "label": "Verdict",
@@ -252,7 +281,10 @@ def sanitize_scorecard_config(value):
         raise ValueError("Les sections de la grille sont requises")
 
     sections = {}
-    for section_key in SCORECARD_SECTION_KEYS:
+    for section_key, raw_section in raw_sections.items():
+        section_key = (section_key or "").strip()
+        if not SCORECARD_KEY_PATTERN.match(section_key):
+            raise ValueError(f"Clé de section invalide: {section_key or 'vide'}")
         raw_section = raw_sections.get(section_key) or {}
         raw_criteria = raw_section.get("criteria") or []
         if not isinstance(raw_criteria, list):
@@ -273,6 +305,7 @@ def sanitize_scorecard_config(value):
 
         sections[section_key] = {
             "title": (raw_section.get("title") or section_key.title()).strip(),
+            "roles": _sanitize_section_roles(raw_section),
             "criteria": criteria,
         }
 
@@ -304,16 +337,14 @@ def _sanitize_criterion(raw_criterion, section_key, seen_keys):
         raise ValueError(f"Type invalide pour le critère {label}")
 
     is_system_criterion = bool(raw_criterion.get("system"))
-    expected_system_type = SCORECARD_SYSTEM_CRITERIA[section_key].get(key)
+    expected_system_type = SCORECARD_SYSTEM_CRITERIA.get(
+        section_key,
+        {},
+    ).get(key)
     if is_system_criterion and expected_system_type != criterion_type:
         raise ValueError(f"Le champ système {label} est invalide")
-    if (
-        not is_system_criterion
-        and criterion_type not in SCORECARD_BUSINESS_CRITERION_TYPES
-    ):
-        raise ValueError(
-            f"Le critère {label} doit être une case à cocher ou une note"
-        )
+    if not is_system_criterion and criterion_type == "computed":
+        raise ValueError(f"Le critère calculé {label} doit être un champ système")
 
     criterion = {
         "key": key,
@@ -358,6 +389,14 @@ def _sanitize_select_options(raw_criterion, label):
     return options
 
 
+def _sanitize_section_roles(raw_section):
+    roles = []
+    for role in raw_section.get("roles") or []:
+        if isinstance(role, str) and SCORECARD_KEY_PATTERN.match(role):
+            roles.append(role)
+    return roles
+
+
 def is_scorecard_ready(scorecard_config):
     sections = (scorecard_config or {}).get("sections") or {}
     return any(
@@ -365,10 +404,10 @@ def is_scorecard_ready(scorecard_config):
             not criterion.get("system")
             and criterion.get("type") != "computed"
             for criterion in (
-                (sections.get(section_key) or {}).get("criteria") or []
+                (section or {}).get("criteria") or []
             )
         )
-        for section_key in SCORECARD_SECTION_KEYS
+        for section in sections.values()
     )
 
 
@@ -380,28 +419,32 @@ def is_required_value_filled(value, criterion_type):
 
 def is_evaluation_complete(evaluation, scorecard_config):
     sections = (scorecard_config or {}).get("sections") or {}
-    reviews = {
-        "filter": _read_evaluation_value(evaluation, "filter_review") or {},
-        "validator": _read_evaluation_value(
-            evaluation,
-            "validator_review",
-        ) or {},
-        "motivation": _read_evaluation_value(
-            evaluation,
-            "motivation_review",
-        ) or {},
-    }
-    for section_key in SCORECARD_SECTION_KEYS:
+    reviews = _evaluation_section_reviews(evaluation)
+    for section_key, section in sections.items():
         criteria = (sections.get(section_key) or {}).get("criteria") or []
         if not criteria:
             return False
         for criterion in criteria:
             if criterion.get("required") and not is_required_value_filled(
-                reviews[section_key].get(criterion.get("key")),
+                (reviews.get(section_key) or {}).get(criterion.get("key")),
                 criterion.get("type"),
             ):
                 return False
     return True
+
+
+def _evaluation_section_reviews(evaluation):
+    section_reviews = _read_evaluation_value(evaluation, "section_reviews") or {}
+    reviews = dict(section_reviews)
+    legacy_reviews = {
+        "filter": _read_evaluation_value(evaluation, "filter_review") or {},
+        "validator": _read_evaluation_value(evaluation, "validator_review") or {},
+        "motivation": _read_evaluation_value(evaluation, "motivation_review") or {},
+    }
+    for section_key, review in legacy_reviews.items():
+        if section_key not in reviews and review:
+            reviews[section_key] = review
+    return reviews
 
 
 def _read_evaluation_value(evaluation, field):

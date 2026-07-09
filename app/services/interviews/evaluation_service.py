@@ -1,5 +1,6 @@
 """Interview candidate planning and evaluation workflows."""
 
+from math import ceil
 from datetime import datetime
 
 from mongoengine.errors import NotUniqueError
@@ -74,6 +75,11 @@ class InterviewEvaluationService:
             ).order_by("created_at")
         )
         admitted_emails = self._admitted_emails(candidates)
+        planning_limit = self._resolve_planning_limit(
+            data.get("candidates_per_slot"),
+            admitted_count=len(admitted_emails),
+            slots_count=len(slots),
+        )
         evaluations = {
             item.candidature_id: item
             for item in InterviewEvaluation.objects(
@@ -87,6 +93,9 @@ class InterviewEvaluationService:
             "already_planned": 0,
             "no_capacity": 0,
             "not_admitted": 0,
+            "planning_limit": planning_limit,
+            "eligible_candidates": len(admitted_emails),
+            "available_slots": len(slots),
         }
 
         for candidate in candidates:
@@ -104,11 +113,12 @@ class InterviewEvaluationService:
                 evaluations,
                 occupancy,
                 counts,
+                planning_limit,
             )
         counts["message"] = (
             f"{counts['planned']} candidat(s) planifié(s), "
             f"{counts['already_planned']} déjà planifié(s), "
-            f"{counts['no_capacity']} sans place disponible"
+            f"{counts['available_slots']} créneau(x) utilisé(s)"
         )
         return counts
 
@@ -161,35 +171,83 @@ class InterviewEvaluationService:
         current_admin,
         sections,
     ):
-        profile_data = current_admin.profile_data or {}
-        role = profile_data.get("interview_role")
-        review_field = self.REVIEW_FIELD_BY_ROLE.get(role)
-        assigned_field = self.ASSIGNED_FIELD_BY_ROLE.get(role)
+        requested_roles = self._requested_roles(data, current_admin)
+        if not requested_roles:
+            raise InterviewForbiddenError(
+                "Cette fiche ne vous est pas affectée"
+            )
         if not evaluation.slot_id:
             raise InterviewForbiddenError(
                 "Cette fiche ne vous est pas affectée"
             )
         slot = InterviewSlot.objects(id=evaluation.slot_id).first()
-        assigned_ids = (
-            getattr(slot, assigned_field, [])
-            if slot and assigned_field
-            else []
-        )
-        if (
-            not review_field
-            or str(current_admin.id) not in (assigned_ids or [])
-        ):
-            raise InterviewForbiddenError(
-                "Cette fiche ne vous est pas affectée"
+        section_reviews = dict(evaluation.section_reviews or {})
+
+        for role in requested_roles:
+            review_field = self.REVIEW_FIELD_BY_ROLE.get(role)
+            assigned_field = self.ASSIGNED_FIELD_BY_ROLE.get(role)
+            assigned_ids = (
+                getattr(slot, assigned_field, [])
+                if slot and assigned_field
+                else []
             )
-        try:
-            review = sanitize_review(
-                data.get(review_field) or {},
-                sections.get(role) or {},
+            if (
+                not review_field
+                or str(current_admin.id) not in (assigned_ids or [])
+            ):
+                raise InterviewForbiddenError(
+                    "Cette fiche ne vous est pas affectée"
+                )
+            existing_review = (
+                section_reviews.get(role)
+                or getattr(evaluation, review_field, {})
+                or {}
             )
-        except (TypeError, ValueError) as error:
-            raise InterviewValidationError(str(error)) from error
-        setattr(evaluation, review_field, review)
+            owner_admin_id = existing_review.get("_owner_admin_id")
+            if owner_admin_id and owner_admin_id != str(current_admin.id):
+                owner_name = existing_review.get("_owner_name") or "un autre jury"
+                raise InterviewConflictError(
+                    f"Cette section est déjà traitée par {owner_name}"
+                )
+            try:
+                review = sanitize_review(
+                    data.get(review_field) or {},
+                    sections.get(role) or {},
+                )
+            except (TypeError, ValueError) as error:
+                raise InterviewValidationError(str(error)) from error
+            review["_owner_admin_id"] = str(current_admin.id)
+            review["_owner_name"] = self._admin_display_name(current_admin)
+            review["_updated_at"] = self.now().isoformat()
+            setattr(evaluation, review_field, review)
+            section_reviews[role] = review
+
+        evaluation.section_reviews = section_reviews
+
+    @staticmethod
+    def _admin_display_name(admin):
+        full_name = " ".join(
+            part
+            for part in (
+                getattr(admin, "first_name", None),
+                getattr(admin, "last_name", None),
+            )
+            if part
+        ).strip()
+        return full_name or getattr(admin, "email", None) or "Jury"
+
+    @classmethod
+    def _requested_roles(cls, data, current_admin):
+        requested_roles = [
+            role
+            for role, review_field in cls.REVIEW_FIELD_BY_ROLE.items()
+            if review_field in data
+        ]
+        if requested_roles:
+            return requested_roles
+        profile_data = current_admin.profile_data or {}
+        role = profile_data.get("interview_role")
+        return [role] if role else []
 
     @staticmethod
     def _staffed_slots(campaign_id, formation):
@@ -229,12 +287,33 @@ class InterviewEvaluationService:
         return occupancy
 
     @staticmethod
-    def _available_slot(slots, occupancy):
-        for slot in slots:
-            slot_id = str(slot.id)
-            if occupancy[slot_id] < max(slot.capacity or 0, 0):
-                return slot
-        return None
+    def _planning_limit(admitted_count, slots_count):
+        if admitted_count <= 0 or slots_count <= 0:
+            return 1
+        return max(ceil(admitted_count / slots_count), 1)
+
+    @classmethod
+    def _resolve_planning_limit(cls, manual_limit, admitted_count, slots_count):
+        if manual_limit in (None, ""):
+            return cls._planning_limit(admitted_count, slots_count)
+        return cls._positive_int(manual_limit, "candidates_per_slot")
+
+    @staticmethod
+    def _available_slot(slots, occupancy, planning_limit):
+        available_slots = [
+            slot
+            for slot in slots
+            if occupancy.get(str(slot.id), 0) < planning_limit
+        ]
+        if not available_slots:
+            return None
+        return min(
+            available_slots,
+            key=lambda slot: (
+                occupancy.get(str(slot.id), 0),
+                getattr(slot, "start_at", None) or datetime.max,
+            ),
+        )
 
     @staticmethod
     def _accept_pending_candidate(candidate):
@@ -250,13 +329,14 @@ class InterviewEvaluationService:
         evaluations,
         occupancy,
         counts,
+        planning_limit,
     ):
         candidate_id = str(candidate.id)
         evaluation = evaluations.get(candidate_id)
         if evaluation and evaluation.slot_id:
             counts["already_planned"] += 1
             return
-        slot = self._available_slot(slots, occupancy)
+        slot = self._available_slot(slots, occupancy, planning_limit)
         if not slot:
             counts["no_capacity"] += 1
             if not evaluation:
@@ -290,6 +370,20 @@ class InterviewEvaluationService:
         evaluations[candidate_id] = evaluation
         occupancy[str(slot.id)] += 1
         counts["planned"] += 1
+
+    @staticmethod
+    def _positive_int(value, field_name):
+        try:
+            number = int(value)
+        except (TypeError, ValueError) as error:
+            raise InterviewValidationError(
+                f"Le champ {field_name} doit être un nombre positif"
+            ) from error
+        if number <= 0:
+            raise InterviewValidationError(
+                f"Le champ {field_name} doit être supérieur à 0"
+            )
+        return number
 
     def _new_evaluation(self, campaign_id, candidate):
         evaluation = InterviewEvaluation(

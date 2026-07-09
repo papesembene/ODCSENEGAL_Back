@@ -2,6 +2,8 @@
 
 import re
 
+from bson import ObjectId
+
 from app.models.candidature import Candidature
 from app.models.interview import (
     InterviewCampaign,
@@ -9,6 +11,8 @@ from app.models.interview import (
     InterviewSlot,
 )
 from app.models.test_result import TestResult
+from app.models.test import Test
+from app.models.test_violation import TestViolation
 from app.models.user import User
 
 
@@ -43,11 +47,6 @@ class InterviewQueryService:
                 is_active=True,
                 admin_type__in=["competences", "super_admin"],
                 profile_data__admin_scope="interview_member",
-                profile_data__interview_role__in=[
-                    "filter",
-                    "validator",
-                    "motivation",
-                ],
             ).order_by("first_name", "last_name")
         occupancy = self._occupancy(slots)
         return {
@@ -274,6 +273,37 @@ class InterviewQueryService:
             )
             if email and email not in test_results_by_email:
                 test_results_by_email[email] = result
+        test_ids = {
+            result.testId
+            for result in test_results_by_email.values()
+            if result.testId
+        }
+        mongo_test_ids = [
+            test_id for test_id in test_ids if ObjectId.is_valid(test_id)
+        ]
+        tests_by_id = {
+            str(test.id): test
+            for test in (
+                Test.objects(id__in=mongo_test_ids)
+                if mongo_test_ids
+                else []
+            )
+        }
+        violations = (
+            TestViolation.objects(
+                testId__in=list(test_ids),
+                candidateEmail__in=candidate_emails,
+            )
+            if test_ids and candidate_emails
+            else []
+        )
+        violations_by_key = {
+            (
+                str(violation.testId),
+                self.normalize_email(violation.candidateEmail),
+            ): violation
+            for violation in violations
+        }
 
         payloads = []
         for evaluation in evaluation_list:
@@ -298,9 +328,112 @@ class InterviewQueryService:
             payload["test_result_status"] = (
                 linked_result.status if linked_result else None
             )
+            payload["test_details"] = self.serialize_test_details(
+                linked_result,
+                tests_by_id,
+                violations_by_key,
+            )
             payloads.append(payload)
 
         return payloads
+
+    def serialize_test_details(
+        self,
+        test_result,
+        tests_by_id,
+        violations_by_key,
+    ):
+        if not test_result:
+            return None
+
+        test = tests_by_id.get(str(test_result.testId))
+        candidate_email = self.normalize_email(
+            getattr(test_result.candidate, "email", None),
+        )
+        violation = violations_by_key.get((str(test_result.testId), candidate_email))
+        questions = []
+        for index, question in enumerate(test.questions if test else []):
+            answer = (test_result.answers or {}).get(str(index))
+            if answer is None:
+                answer = (test_result.answers or {}).get(index)
+            questions.append({
+                "index": index + 1,
+                "question": question.question,
+                "type": question.type,
+                "options": question.options or [],
+                "answer": answer,
+                "answerLabel": self.format_answer_label(question, answer),
+                "correctAnswer": question.correctAnswer,
+                "correctAnswers": question.correctAnswers or [],
+                "correctAnswerLabel": self.format_correct_answer_label(question),
+                "isCorrect": self.is_correct_answer(question, answer, test_result, index),
+                "score": question.score,
+                "manualGrade": (test_result.manualGrades or {}).get(str(index)),
+            })
+
+        return {
+            "testId": test_result.testId,
+            "testTitle": test_result.testTitle,
+            "score": test_result.score,
+            "status": test_result.status,
+            "completedAt": test_result.completedAt.isoformat() if test_result.completedAt else None,
+            "questions": questions,
+            "violations": violation.to_dict() if violation else None,
+        }
+
+    @staticmethod
+    def format_answer_label(question, answer):
+        if question.type == "qcm_simple":
+            try:
+                index = int(answer)
+                return question.options[index] if question.options and 0 <= index < len(question.options) else str(answer)
+            except (TypeError, ValueError):
+                return str(answer or "")
+        if question.type == "qcm_multiple":
+            labels = []
+            for item in answer or []:
+                try:
+                    index = int(item)
+                    labels.append(question.options[index] if question.options and 0 <= index < len(question.options) else str(item))
+                except (TypeError, ValueError):
+                    labels.append(str(item))
+            return ", ".join(labels)
+        return str(answer or "")
+
+    @staticmethod
+    def format_correct_answer_label(question):
+        if question.type == "qcm_simple":
+            index = question.correctAnswer
+            return question.options[index] if question.options and index is not None and 0 <= index < len(question.options) else ""
+        if question.type == "qcm_multiple":
+            labels = []
+            for index in question.correctAnswers or []:
+                if question.options and 0 <= index < len(question.options):
+                    labels.append(question.options[index])
+            return ", ".join(labels)
+        return ""
+
+    @staticmethod
+    def is_correct_answer(question, answer, test_result, index):
+        if question.type == "qcm_simple":
+            try:
+                return int(answer) == int(question.correctAnswer)
+            except (TypeError, ValueError):
+                return False
+
+        if question.type == "qcm_multiple":
+            try:
+                selected = sorted(int(item) for item in (answer or []))
+                expected = sorted(int(item) for item in (question.correctAnswers or []))
+                return selected == expected
+            except (TypeError, ValueError):
+                return False
+
+        manual_grade = (test_result.manualGrades or {}).get(str(index))
+        try:
+            return float(manual_grade) > 0
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _is_interview_member(current_admin):
