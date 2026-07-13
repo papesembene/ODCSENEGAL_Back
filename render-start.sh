@@ -11,4 +11,9 @@ if [ "${RUN_PREPROD_SEED:-false}" = "true" ]; then
   echo "Seed de préproduction terminé."
 fi
 
+if [ "${RUN_DELETE_PREPROD_CANDIDATURE_CAMPAIGNS:-false}" = "true" ]; then
+  echo "RUN_DELETE_PREPROD_CANDIDATURE_CAMPAIGNS=true: suppression des campagnes de candidature préprod..."
+  python delete_preprod_candidature_campaigns.py
+fi
+
 exec gunicorn run:app --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-8} --timeout ${GUNICORN_TIMEOUT:-120}
