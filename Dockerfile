@@ -18,8 +18,10 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-RUN mkdir -p logs app/uploads app/static/uploads/portal flask_session
+RUN chmod +x docker-entrypoint.sh \
+    && mkdir -p logs app/uploads app/static/uploads/portal flask_session
 
 EXPOSE 5000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["python", "run.py"]
