@@ -6,6 +6,8 @@ import logging
 from flask import current_app
 from flask_mail import Mail, Message
 
+from app.services.brevo_email_service import BrevoEmailService
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ class ApplicationEmailService:
 
     def __init__(self, app=None):
         self.mail = None
+        self.brevo = BrevoEmailService()
         if app is not None:
             self.init_app(app)
 
@@ -53,11 +56,25 @@ class ApplicationEmailService:
 
     def _send(self, subject, recipients, html, reply_to=None):
         if not self.mail:
+            if self.brevo.is_configured:
+                return self.brevo.send_html(
+                    recipients=recipients,
+                    subject=subject,
+                    html=html,
+                    reply_to=reply_to,
+                )["sent"]
             logger.warning(
                 "Email %s ignoré: service mail non initialisé",
                 self.program_name,
             )
             return False
+        if self.brevo.is_configured:
+            return self.brevo.send_html(
+                recipients=recipients,
+                subject=subject,
+                html=html,
+                reply_to=reply_to,
+            )["sent"]
         sender = current_app.config.get("MAIL_DEFAULT_SENDER")
         if not sender:
             logger.warning(

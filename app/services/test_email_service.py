@@ -7,6 +7,7 @@ import certifi
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Content, Email, Mail, To
 
+from app.services.brevo_email_service import BrevoEmailService
 from app.services.email_templates.test_invitation import (
     build_test_invitation_html,
 )
@@ -35,6 +36,7 @@ class TestEmailService:
             if self.sendgrid_api_key
             else None
         )
+        self.brevo = BrevoEmailService()
         if not self.sendgrid_api_key:
             logging.warning(
                 "SENDGRID_API_KEY non configurée; emails désactivés."
@@ -69,6 +71,30 @@ class TestEmailService:
             test_duration=test_duration,
             test_link=test_link,
         )
+        if self.brevo.is_configured:
+            result = self.brevo.send_html(
+                recipients=[
+                    {
+                        "email": candidate_email,
+                        "name": candidate_name,
+                    }
+                ],
+                subject=f"Invitation au test - {test_title}",
+                html=html_content,
+            )
+            if result["sent"]:
+                logging.info("Email Brevo envoyé à %s", candidate_email)
+                return True
+            logging.error(result["message"])
+            return False
+
+        if not self.client:
+            logging.error(
+                "SendGrid non configuré; email non envoyé à %s",
+                candidate_email,
+            )
+            return False
+
         message = Mail(
             from_email=Email(
                 self.from_email,

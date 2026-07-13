@@ -5,6 +5,8 @@ from email.mime.text import MIMEText
 import os
 import smtplib
 
+from app.services.brevo_email_service import BrevoEmailService
+
 
 class ContactService:
     SMTP_HOST = "smtp.gmail.com"
@@ -12,12 +14,27 @@ class ContactService:
 
     def send(self, data):
         data = data or {}
-        sender_email = os.getenv("MAIL_USERNAME")
-        sender_password = os.getenv("MAIL_PASSWORD")
         recipient_email = os.getenv(
             "CONTACT_RECIPIENT_EMAIL",
             "thiernohamidou.balde@orange-sonatel.com",
         )
+        brevo = BrevoEmailService()
+        if brevo.is_configured:
+            result = brevo.send_html(
+                recipients=[recipient_email],
+                subject=(
+                    "Nouveau message de contact - "
+                    f"{data.get('subject') or 'ODC'}"
+                ),
+                html=self._build_html(data),
+                reply_to=data.get("email"),
+            )
+            if not result["sent"]:
+                raise RuntimeError(result["message"])
+            return
+
+        sender_email = os.getenv("MAIL_USERNAME")
+        sender_password = os.getenv("MAIL_PASSWORD")
         if not sender_email or not sender_password:
             raise RuntimeError("Configuration email manquante")
 
@@ -49,3 +66,17 @@ class ContactService:
         message["Subject"] = f"Nouveau message de contact - {subject}"
         message.attach(MIMEText(body, "plain"))
         return message
+
+    @staticmethod
+    def _build_html(data):
+        return f"""
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
+          <h2>Nouveau message de contact</h2>
+          <p><strong>Nom :</strong> {data.get('name') or '-'}</p>
+          <p><strong>Email :</strong> {data.get('email') or '-'}</p>
+          <p><strong>Téléphone :</strong> {data.get('phone') or '-'}</p>
+          <p><strong>Préférence :</strong> {data.get('contactPreference') or '-'}</p>
+          <p><strong>Message :</strong></p>
+          <p>{data.get('message') or ''}</p>
+        </div>
+        """

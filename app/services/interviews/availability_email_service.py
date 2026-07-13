@@ -8,6 +8,7 @@ import certifi
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Content, Email, Mail, To
 
+from app.services.brevo_email_service import BrevoEmailService
 from app.services.sendgrid_helpers import (
     sendgrid_error_detail,
     sendgrid_response_detail,
@@ -33,15 +34,9 @@ class InterviewAvailabilityEmailService:
             if self.sendgrid_api_key
             else None
         )
+        self.brevo = BrevoEmailService()
 
     def send_availability_request(self, jury, slot, roles, token):
-        if not self.client:
-            logging.warning(
-                "SENDGRID_API_KEY non configurée; disponibilité non envoyée à %s",
-                jury.email,
-            )
-            return False
-
         available_link = self._availability_link(token, "available")
         unavailable_link = self._availability_link(token, "unavailable")
         html_content = self._build_html(
@@ -51,6 +46,34 @@ class InterviewAvailabilityEmailService:
             available_link=available_link,
             unavailable_link=unavailable_link,
         )
+        if self.brevo.is_configured:
+            result = self.brevo.send_html(
+                recipients=[
+                    {
+                        "email": jury.email,
+                        "name": self._jury_name(jury),
+                    }
+                ],
+                subject=f"Disponibilité jury - {slot.label}",
+                html=html_content,
+            )
+            if result["sent"]:
+                logging.info(
+                    "Email disponibilité Brevo envoyé à %s pour créneau %s",
+                    jury.email,
+                    slot.id,
+                )
+                return True
+            logging.error(result["message"])
+            return False
+
+        if not self.client:
+            logging.warning(
+                "SENDGRID_API_KEY non configurée; disponibilité non envoyée à %s",
+                jury.email,
+            )
+            return False
+
         message = Mail(
             from_email=Email(self.from_email, "Orange Digital Center"),
             to_emails=To(jury.email),
@@ -80,6 +103,17 @@ class InterviewAvailabilityEmailService:
                 sendgrid_error_detail(error),
             )
         return False
+
+    @staticmethod
+    def _jury_name(jury):
+        return " ".join(
+            value
+            for value in [
+                getattr(jury, "first_name", ""),
+                getattr(jury, "last_name", ""),
+            ]
+            if value
+        ).strip()
 
     def _availability_link(self, token, response):
         return (

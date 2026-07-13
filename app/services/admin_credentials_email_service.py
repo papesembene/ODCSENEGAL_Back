@@ -8,6 +8,7 @@ import certifi
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Content, Email, Mail, To
 
+from app.services.brevo_email_service import BrevoEmailService
 from app.services.sendgrid_helpers import (
     sendgrid_error_detail,
     sendgrid_response_detail,
@@ -33,8 +34,22 @@ class AdminCredentialsEmailService:
             if self.sendgrid_api_key
             else None
         )
+        self.brevo = BrevoEmailService()
 
     def send_credentials(self, user, temporary_password, role_label):
+        html_content = self._build_html(user, temporary_password, role_label)
+        if self.brevo.is_configured:
+            return self.brevo.send_html(
+                recipients=[
+                    {
+                        "email": user.email,
+                        "name": self._display_name(user),
+                    }
+                ],
+                subject="Vos accès jury - Orange Digital Center Sénégal",
+                html=html_content,
+            )
+
         if not self.client:
             logging.warning(
                 "SENDGRID_API_KEY non configurée; identifiants non envoyés à %s",
@@ -45,7 +60,6 @@ class AdminCredentialsEmailService:
                 "message": "Email non envoyé: SENDGRID_API_KEY non configurée",
             }
 
-        html_content = self._build_html(user, temporary_password, role_label)
         message = Mail(
             from_email=Email(self.from_email, "Orange Digital Center"),
             to_emails=To(user.email),
@@ -81,12 +95,19 @@ class AdminCredentialsEmailService:
             "message": "Email non envoyé: erreur du service email",
         }
 
-    def _build_html(self, user, temporary_password, role_label):
-        full_name = " ".join(
+    @staticmethod
+    def _display_name(user):
+        return " ".join(
             value
-            for value in [getattr(user, "first_name", ""), getattr(user, "last_name", "")]
+            for value in [
+                getattr(user, "first_name", ""),
+                getattr(user, "last_name", ""),
+            ]
             if value
-        ).strip() or getattr(user, "email", "jury")
+        ).strip()
+
+    def _build_html(self, user, temporary_password, role_label):
+        full_name = self._display_name(user) or getattr(user, "email", "jury")
         login_url = f"{self.frontend_url}/astrodmin"
 
         return f"""
