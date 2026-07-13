@@ -10,6 +10,9 @@ from app.services.admin import (
     AdminDashboardService,
 )
 from app.services.auth_service import AuthService
+from app.services.admin_credentials_email_service import (
+    AdminCredentialsEmailService,
+)
 from app.models.user import User
 from app.models.interview import InterviewSlot
 from app.utils.auth_decorators import admin_required
@@ -19,7 +22,7 @@ admin_bp = Blueprint("admin_bp", __name__)
 
 INTERVIEW_ROLE_LABELS = {
     "filter": "Filtre",
-    "validator": "Validation",
+    "validator": "Validation / coach",
     "motivation": "Motivation",
 }
 
@@ -48,6 +51,13 @@ def _serialize_interview_member(user):
         "role_label": INTERVIEW_ROLE_LABELS.get(
             profile_data.get("interview_role"),
             profile_data.get("interview_role") or "-",
+        ),
+        "credentials_email_sent": bool(
+            profile_data.get("credentials_email_sent")
+        ),
+        "credentials_email_message": profile_data.get(
+            "credentials_email_message",
+            "",
         ),
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
@@ -109,6 +119,21 @@ def _login_error_message(error):
     if message.startswith(("401", "Unauthorized")):
         return "Email ou mot de passe incorrect"
     return message
+
+
+def _send_member_credentials(user, temporary_password, role):
+    role_label = INTERVIEW_ROLE_LABELS.get(role, role or "-")
+    result = AdminCredentialsEmailService().send_credentials(
+        user=user,
+        temporary_password=temporary_password,
+        role_label=role_label,
+    )
+    profile_data = user.profile_data or {}
+    profile_data["credentials_email_sent"] = bool(result.get("sent"))
+    profile_data["credentials_email_message"] = result.get("message", "")
+    user.profile_data = profile_data
+    user.save()
+    return result
 
 
 @admin_bp.route("/login", methods=["POST", "OPTIONS"])
@@ -405,14 +430,18 @@ def create_interview_member():
             },
         )
         user.save()
+        email_result = _send_member_credentials(user, password, role)
 
         return jsonify(
             {
                 "success": True,
                 "message": "Membre du jury créé avec succès",
                 "user": AuthService.user_to_safe_json(user),
+                "data": _serialize_interview_member(user),
                 "role_label": INTERVIEW_ROLE_LABELS[role],
                 "temporary_password": password,
+                "credentials_email_sent": email_result.get("sent", False),
+                "credentials_email_message": email_result.get("message", ""),
             }
         ), 201
     except BadRequest as error:
@@ -455,6 +484,12 @@ def update_interview_member(member_id):
         if "is_active" in data:
             user.is_active = bool(data["is_active"])
 
+        temporary_password = None
+        email_result = None
+        if data.get("reset_password"):
+            temporary_password = _generate_temporary_password()
+            user.password_hash = generate_password_hash(temporary_password)
+
         first_name = data.get("first_name")
         last_name = data.get("last_name")
         if first_name is not None:
@@ -463,10 +498,29 @@ def update_interview_member(member_id):
             user.last_name = last_name.strip()
 
         user.save()
+        if temporary_password:
+            role = (user.profile_data or {}).get("interview_role")
+            email_result = _send_member_credentials(
+                user,
+                temporary_password,
+                role,
+            )
+
         return jsonify({
             "success": True,
-            "message": "Membre du jury mis à jour",
+            "message": (
+                "Mot de passe réinitialisé"
+                if temporary_password
+                else "Membre du jury mis à jour"
+            ),
             "data": _serialize_interview_member(user),
+            "temporary_password": temporary_password,
+            "credentials_email_sent": (
+                email_result.get("sent", False) if email_result else None
+            ),
+            "credentials_email_message": (
+                email_result.get("message", "") if email_result else ""
+            ),
         }), 200
     except BadRequest as error:
         return jsonify({"success": False, "error": str(error)}), 400

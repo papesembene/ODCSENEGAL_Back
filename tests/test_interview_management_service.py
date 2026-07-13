@@ -103,6 +103,7 @@ class InterviewManagementServiceTest(unittest.TestCase):
             filter_questions=[],
         )
         self.repository.has_evaluations = True
+        self.service._can_manage_filter_questions = lambda *_args: True
 
         campaign = self.service.update_campaign(
             "campaign-id",
@@ -136,6 +137,32 @@ class InterviewManagementServiceTest(unittest.TestCase):
             ],
             campaign.filter_questions,
         )
+
+    def test_update_campaign_blocks_filter_questions_without_coach_assignment(self):
+        self.repository.campaign = SimpleNamespace(
+            name="P8",
+            formation="dev-web-mobile",
+            description="",
+            status="draft",
+            scorecard_config={},
+            filter_questions=[],
+        )
+
+        with self.assertRaisesRegex(
+            InterviewValidationError,
+            "Seuls les coachs affectés",
+        ):
+            self.service.update_campaign(
+                "campaign-id",
+                {
+                    "filter_questions": [
+                        {
+                            "question": "Question coach",
+                            "expected_answer": "Réponse attendue",
+                        },
+                    ],
+                },
+            )
 
     def test_create_slot_keeps_filter_and_legacy_jury_in_sync(self):
         slot = self.service.create_slot({

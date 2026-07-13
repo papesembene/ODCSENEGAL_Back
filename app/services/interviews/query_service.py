@@ -60,6 +60,31 @@ class InterviewQueryService:
             "slot_occupancy": occupancy,
         }
 
+    def member_capabilities(self, current_admin):
+        if not self._is_interview_member(current_admin):
+            return {
+                "is_interview_member": False,
+                "can_manage_questions": True,
+                "validator_campaign_ids": [],
+            }
+
+        admin_id = str(current_admin.id)
+        validator_slots = InterviewSlot.objects(
+            assigned_validator_ids=admin_id,
+        ).only("campaign_id")
+        validator_campaign_ids = sorted(
+            {
+                slot.campaign_id
+                for slot in validator_slots
+                if slot.campaign_id
+            }
+        )
+        return {
+            "is_interview_member": True,
+            "can_manage_questions": bool(validator_campaign_ids),
+            "validator_campaign_ids": validator_campaign_ids,
+        }
+
     @staticmethod
     def list_campaign_documents(formation=None):
         query = InterviewCampaign.objects.order_by("-created_at")

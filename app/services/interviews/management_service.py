@@ -5,6 +5,7 @@ import secrets
 
 from mongoengine.connection import ConnectionFailure
 
+from app.models.interview import InterviewSlot
 from app.models.user import User
 from app.repositories.interview_repository import InterviewRepository
 from app.services.interviews.availability_email_service import (
@@ -54,7 +55,7 @@ class InterviewManagementService:
         campaign.updated_at = self.now()
         return self.repository.save_campaign(campaign)
 
-    def update_campaign(self, campaign_id, data):
+    def update_campaign(self, campaign_id, data, current_admin=None):
         campaign = self.repository.get_campaign(campaign_id)
         if not campaign:
             raise InterviewNotFoundError("Campagne non trouvée")
@@ -77,12 +78,33 @@ class InterviewManagementService:
                 raise InterviewValidationError(str(error)) from error
 
         if "filter_questions" in data:
+            if not self._can_manage_filter_questions(campaign, current_admin):
+                raise InterviewValidationError(
+                    "Seuls les coachs affectés à ce référentiel peuvent "
+                    "modifier les questions d'entretien."
+                )
             campaign.filter_questions = self._sanitize_filter_questions(
                 data["filter_questions"],
             )
 
         campaign.updated_at = self.now()
         return self.repository.save_campaign(campaign)
+
+    def _can_manage_filter_questions(self, campaign, current_admin):
+        if not current_admin:
+            return False
+        profile_data = current_admin.profile_data or {}
+        if profile_data.get("admin_scope") != "interview_member":
+            return False
+        return bool(
+            InterviewSlot.objects(
+                campaign_id=str(campaign.id),
+                formation=campaign.formation,
+                assigned_validator_ids=str(current_admin.id),
+            )
+            .only("id")
+            .first()
+        )
 
     def create_slot(self, data):
         required_fields = (

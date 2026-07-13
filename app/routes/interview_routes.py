@@ -35,6 +35,19 @@ def get_interviews_bootstrap():
     return jsonify({"success": True, "data": data}), 200
 
 
+@interview_bp.route("/interviews/capabilities", methods=["GET"])
+@admin_required(ADMIN_TYPES)
+def get_interview_capabilities():
+    return jsonify(
+        {
+            "success": True,
+            "data": query_service.member_capabilities(
+                getattr(g, "current_admin", None),
+            ),
+        }
+    ), 200
+
+
 @interview_bp.route("/interviews/campaigns", methods=["GET"])
 @admin_required(ADMIN_TYPES)
 def get_interview_campaigns():
@@ -72,6 +85,7 @@ def update_interview_campaign(campaign_id):
         campaign = management_service.update_campaign(
             campaign_id,
             request.get_json(silent=True) or {},
+            current_admin=getattr(g, "current_admin", None),
         )
         return jsonify(
             {"success": True, "data": campaign.to_dict()}
