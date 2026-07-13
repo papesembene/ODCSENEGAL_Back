@@ -2,6 +2,9 @@
 
 import logging
 import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from html import escape
 
 import requests
@@ -12,6 +15,17 @@ class BrevoEmailService:
 
     def __init__(self, api_key=None, from_email=None, from_name=None):
         self.api_key = api_key or os.getenv("BREVO_API_KEY")
+        self.smtp_key = os.getenv("BREVO_SMTP_KEY") or self.api_key
+        self.smtp_login = (
+            os.getenv("BREVO_SMTP_LOGIN")
+            or os.getenv("BREVO_SMTP_USERNAME")
+            or os.getenv("MAIL_USERNAME")
+        )
+        self.smtp_server = os.getenv(
+            "BREVO_SMTP_SERVER",
+            "smtp-relay.brevo.com",
+        )
+        self.smtp_port = int(os.getenv("BREVO_SMTP_PORT", "587"))
         self.from_email = (
             from_email
             or os.getenv("BREVO_FROM_EMAIL")
@@ -27,7 +41,14 @@ class BrevoEmailService:
 
     @property
     def is_configured(self):
-        return bool(self.api_key and self.from_email)
+        return bool((self.api_key or self.smtp_key) and self.from_email)
+
+    @property
+    def should_use_smtp(self):
+        provider = os.getenv("EMAIL_PROVIDER", "").lower()
+        if provider == "brevo_smtp":
+            return True
+        return bool((self.smtp_key or "").startswith("xsmtpsib-"))
 
     def send_html(self, recipients, subject, html, reply_to=None):
         recipients = self._normalize_recipients(recipients)
@@ -44,6 +65,8 @@ class BrevoEmailService:
                 "sent": False,
                 "message": "Email non envoyé: aucun destinataire",
             }
+        if self.should_use_smtp:
+            return self._send_smtp(recipients, subject, html, reply_to)
 
         payload = {
             "sender": {"email": self.from_email, "name": self.from_name},
@@ -76,6 +99,35 @@ class BrevoEmailService:
             return {"sent": False, "message": f"Email non envoyé: {detail}"}
         except Exception as error:
             logging.exception("Erreur Brevo: %s", error)
+            return {"sent": False, "message": f"Email non envoyé: {error}"}
+
+    def _send_smtp(self, recipients, subject, html, reply_to=None):
+        if not self.smtp_login or not self.smtp_key:
+            return {
+                "sent": False,
+                "message": (
+                    "Email non envoyé: BREVO_SMTP_LOGIN et "
+                    "BREVO_SMTP_KEY sont requis pour une clé xsmtpsib"
+                ),
+            }
+        try:
+            for recipient in recipients:
+                message = MIMEMultipart()
+                message["From"] = f"{self.from_name} <{self.from_email}>"
+                message["To"] = recipient["email"]
+                message["Subject"] = subject
+                if reply_to:
+                    message["Reply-To"] = reply_to
+                message.attach(MIMEText(html, "html", "utf-8"))
+
+                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.login(self.smtp_login, self.smtp_key)
+                    server.send_message(message)
+            return {"sent": True, "message": "Email envoyé"}
+        except Exception as error:
+            logging.exception("Erreur SMTP Brevo: %s", error)
             return {"sent": False, "message": f"Email non envoyé: {error}"}
 
     @staticmethod
