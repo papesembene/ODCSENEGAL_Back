@@ -10,6 +10,10 @@ from sendgrid.helpers.mail import Content, Email, Mail, To
 from app.services.email_templates.test_invitation import (
     build_test_invitation_html,
 )
+from app.services.sendgrid_helpers import (
+    sendgrid_error_detail,
+    sendgrid_response_detail,
+)
 
 
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
@@ -80,15 +84,16 @@ class TestEmailService:
                 logging.info("Email envoyé à %s", candidate_email)
                 return True
             logging.error(
-                "Erreur SendGrid pour %s: statut %s",
+                "Erreur SendGrid pour %s: statut %s - %s",
                 candidate_email,
                 response.status_code,
+                sendgrid_response_detail(response),
             )
         except Exception as error:
             logging.exception(
                 "Erreur d'envoi à %s: %s",
                 candidate_email,
-                error,
+                sendgrid_error_detail(error),
             )
         return False
 

@@ -8,6 +8,11 @@ import certifi
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Content, Email, Mail, To
 
+from app.services.sendgrid_helpers import (
+    sendgrid_error_detail,
+    sendgrid_response_detail,
+)
+
 
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
@@ -54,16 +59,22 @@ class AdminCredentialsEmailService:
                 logging.info("Identifiants envoyés à %s", user.email)
                 return {"sent": True, "message": "Email envoyé"}
             logging.error(
-                "Erreur SendGrid identifiants %s: statut %s",
+                "Erreur SendGrid identifiants %s: statut %s - %s",
                 user.email,
                 response.status_code,
+                sendgrid_response_detail(response),
             )
         except Exception as error:
+            detail = sendgrid_error_detail(error)
             logging.exception(
                 "Erreur d'envoi des identifiants à %s: %s",
                 user.email,
-                error,
+                detail,
             )
+            return {
+                "sent": False,
+                "message": f"Email non envoyé: {detail}",
+            }
 
         return {
             "sent": False,

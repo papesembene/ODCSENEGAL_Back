@@ -8,6 +8,11 @@ import certifi
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Content, Email, Mail, To
 
+from app.services.sendgrid_helpers import (
+    sendgrid_error_detail,
+    sendgrid_response_detail,
+)
+
 
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
@@ -63,15 +68,16 @@ class InterviewAvailabilityEmailService:
                 )
                 return True
             logging.error(
-                "Erreur SendGrid disponibilité %s: statut %s",
+                "Erreur SendGrid disponibilité %s: statut %s - %s",
                 jury.email,
                 response.status_code,
+                sendgrid_response_detail(response),
             )
         except Exception as error:
             logging.exception(
                 "Erreur d'envoi disponibilité à %s: %s",
                 jury.email,
-                error,
+                sendgrid_error_detail(error),
             )
         return False
 
