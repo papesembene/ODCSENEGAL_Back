@@ -65,13 +65,7 @@ def create_app(config_class=Config):
         app,
         resources={
             r"/api/*": {
-                "origins": [
-                    "https://odcdeploye-ee2i.vercel.app",
-                    "http://localhost:3000",
-                    "https://localhost:3000",
-                    "http://localhost:3001",
-                    "https://orangedigitalcenter.sn"
-                ],
+                "origins": app.config.get("CORS_ALLOWED_ORIGINS", []),
                 "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                 "allow_headers": ["Content-Type", "Authorization"],
                 "supports_credentials": True

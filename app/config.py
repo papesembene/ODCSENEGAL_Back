@@ -52,6 +52,21 @@ class Config:
     )
     
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://orangedigitalcenter.sn')
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            ",".join(
+                [
+                    os.getenv('FRONTEND_URL', 'https://orangedigitalcenter.sn'),
+                    "http://localhost:3000",
+                    "https://localhost:3000",
+                    "http://localhost:3001",
+                ]
+            ),
+        ).split(",")
+        if origin.strip()
+    ]
     SESSION_TYPE = 'filesystem'
 
     # Configuration Mail
