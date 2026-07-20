@@ -22,7 +22,7 @@ class TestGroupService:
         "Data",
         "Hackeuse",
         "AWS",
-        "Design UX/UI",
+        "Référent Digital",
         "Cyber security",
         "Intelligence Artificielle",
     )

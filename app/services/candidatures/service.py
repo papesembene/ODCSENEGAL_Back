@@ -57,7 +57,7 @@ class CandidatureService:
         "Data",
         "Hackeuse",
         "AWS",
-        "Design UX/UI",
+        "Référent Digital",
     )
 
     def __init__(self, repository=None, now=None, campaign_service=None):
