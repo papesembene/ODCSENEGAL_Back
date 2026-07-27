@@ -201,10 +201,12 @@ class TestAccessService:
         phone,
         ip,
         rate_limit_prefix,
+        allow_existing_result=False,
+        skip_rate_limit=False,
     ):
         email = (email or "").strip().lower()
         phone = (phone or "").strip()
-        if self.rate_limiter.is_limited(
+        if not skip_rate_limit and self.rate_limiter.is_limited(
             f"{rate_limit_prefix}:{ip}:{email or 'unknown'}",
         ):
             raise TestAccessError(
@@ -251,7 +253,7 @@ class TestAccessService:
         if TestResult.objects(
             testId=str(test.id),
             candidate__email=email,
-        ).only("id").first():
+        ).only("id").first() and not allow_existing_result:
             self._deny(test_id, email, ip, "already_passed")
             raise TestAccessError("Test déjà passé", 403)
 
@@ -318,6 +320,17 @@ class TestAccessService:
             phone=phone,
             ip=ip,
             rate_limit_prefix="submit",
+            allow_existing_result=True,
+        )
+
+    def validate_draft(self, test_id, email, phone, ip="draft"):
+        return self._verify_candidate_access(
+            test_id=test_id,
+            email=email,
+            phone=phone,
+            ip=ip,
+            rate_limit_prefix="draft",
+            skip_rate_limit=True,
         )
 
     @staticmethod

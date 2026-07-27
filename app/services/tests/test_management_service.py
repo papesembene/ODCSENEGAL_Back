@@ -135,15 +135,12 @@ class TestManagementService:
             f"^{re.escape(candidate_email)}$",
             re.IGNORECASE,
         )
-        if TestResult.objects(
+        existing_result = TestResult.objects(
             testId=data["testId"],
             candidate__email=email_pattern,
-        ).only("id").first():
-            raise TestServiceError(
-                "Vous avez déjà passé ce test",
-                409,
-                duplicate=True,
-            )
+        ).first()
+        if existing_result:
+            return existing_result, False
 
         passing_score = data.get("passingScore", 70)
         result = TestResult(
@@ -178,13 +175,19 @@ class TestManagementService:
                 marker in error_text
                 for marker in ("duplicate", "e11000", "duplicate key")
             ):
+                existing_result = TestResult.objects(
+                    testId=data["testId"],
+                    candidate__email=email_pattern,
+                ).first()
+                if existing_result:
+                    return existing_result, False
                 raise TestServiceError(
                     "Vous avez déjà passé ce test",
                     409,
                     duplicate=True,
                 ) from error
             raise
-        return result
+        return result, True
 
     def update_result(self, result_id, data):
         result = self.get_result(result_id)

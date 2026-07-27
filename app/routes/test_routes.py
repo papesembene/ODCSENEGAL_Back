@@ -9,12 +9,17 @@ from app.services.tests.test_access_service import (
     TestAccessError,
     TestAccessService,
 )
+from app.services.tests.test_session_service import (
+    TestSessionService,
+    TestSessionServiceError,
+)
 
 logger = logging.getLogger(__name__)
 
 test_bp = Blueprint("test", __name__)
 test_management_service = TestManagementService()
 test_access_service = TestAccessService()
+test_session_service = TestSessionService()
 
 
 def build_candidate_error(message, status_code):
@@ -179,12 +184,21 @@ def submit_result():
             candidate.get("phone"),
             request.remote_addr or "unknown",
         )
-        result = test_management_service.submit_result(payload)
+        result, created = test_management_service.submit_result(payload)
+        test_session_service.mark_submitted(
+            payload.get("testId"),
+            (candidate.get("email") or "").strip().lower(),
+        )
         return jsonify({
             'success': True,
-            'message': 'Résultat enregistré avec succès',
+            'message': (
+                'Résultat enregistré avec succès'
+                if created
+                else 'Résultat déjà enregistré'
+            ),
+            'idempotent': not created,
             'data': result.to_dict()
-        }), 201
+        }), 201 if created else 200
     except TestAccessError as error:
         return build_candidate_error(str(error), error.status_code)
     except TestServiceError as error:
@@ -197,6 +211,75 @@ def submit_result():
         return jsonify({
             'success': False,
             'error': f"Erreur lors de la soumission du résultat : {str(e)}"
+        }), 500
+
+
+@test_bp.route('/tests/<test_id>/session-draft', methods=['GET'])
+def get_test_session_draft(test_id):
+    try:
+        email = request.args.get("email")
+        phone = request.args.get("phone")
+        access = test_access_service.validate_draft(
+            test_id,
+            email,
+            phone,
+            request.remote_addr or "unknown",
+        )
+        draft = test_session_service.get_draft(
+            test_id,
+            access["candidate"]["email"],
+        )
+        return jsonify({
+            "success": True,
+            "data": draft.to_dict() if draft else None,
+        }), 200
+    except TestAccessError as error:
+        return build_candidate_error(str(error), error.status_code)
+    except TestSessionServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), error.status_code
+    except Exception as error:
+        logger.error(
+            "Internal draft read error test_id=%s ip=%s error=%s",
+            test_id,
+            request.remote_addr,
+            error,
+        )
+        return jsonify({
+            "success": False,
+            "error": "Erreur lors de la lecture du brouillon",
+        }), 500
+
+
+@test_bp.route('/tests/<test_id>/session-draft', methods=['PUT'])
+def save_test_session_draft(test_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        access = test_access_service.validate_draft(
+            test_id,
+            data.get("email"),
+            data.get("phone"),
+            request.remote_addr or "unknown",
+        )
+        draft = test_session_service.save_draft(test_id, data, access)
+        return jsonify({
+            "success": True,
+            "message": "Brouillon sauvegardé",
+            "data": draft.to_dict(),
+        }), 200
+    except TestAccessError as error:
+        return build_candidate_error(str(error), error.status_code)
+    except TestSessionServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), error.status_code
+    except Exception as error:
+        logger.error(
+            "Internal draft save error test_id=%s ip=%s error=%s",
+            test_id,
+            request.remote_addr,
+            error,
+        )
+        return jsonify({
+            "success": False,
+            "error": "Erreur lors de la sauvegarde du brouillon",
         }), 500
  
 @test_bp.route('/tests/results/<result_id>', methods=['PUT', 'PATCH'])
