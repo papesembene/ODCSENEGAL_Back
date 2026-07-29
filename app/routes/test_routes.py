@@ -467,10 +467,14 @@ def verify_test_access(test_id):
 def get_public_test_metadata(test_id):
     """Récupérer uniquement les métadonnées publiques nécessaires avant le début du test"""
     try:
-        return jsonify({
+        response = jsonify({
             'success': True,
             'data': test_access_service.get_public_metadata(test_id),
-        }), 200
+        })
+        response.headers["Cache-Control"] = (
+            "public, max-age=60, stale-while-revalidate=300"
+        )
+        return response, 200
     except TestAccessError as error:
         return jsonify({
             'success': False,

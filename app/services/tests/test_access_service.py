@@ -62,7 +62,7 @@ class SlidingWindowRateLimiter:
 
 
 class ExpiringTestCache:
-    def __init__(self, ttl=30):
+    def __init__(self, ttl=300):
         self.ttl = ttl
         self.values = {}
         self.loading_locks = defaultdict(threading.Lock)
@@ -311,10 +311,11 @@ class TestAccessService:
         }
 
     def get_public_metadata(self, test_id):
+        started_at = time.perf_counter()
         test = self.cache.get(test_id)
         if not test:
             raise TestAccessError("Test non trouvé", 404)
-        return {
+        metadata = {
             "id": str(test.id),
             "title": test.title,
             "referentiel": test.referentiel,
@@ -326,6 +327,12 @@ class TestAccessService:
             ),
             "status": test.status,
         }
+        logger.info(
+            "Public test metadata served test_id=%s duration_ms=%s",
+            test_id,
+            round((time.perf_counter() - started_at) * 1000, 2),
+        )
+        return metadata
 
     def validate_submission(self, test_id, email, phone, ip="submission"):
         return self._verify_candidate_access(
