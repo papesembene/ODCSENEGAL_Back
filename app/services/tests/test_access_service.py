@@ -11,7 +11,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from app.models.candidature import Candidature
-from app.models.test import ConnectionLog, Test
+from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
 from app.services.tests.formation_catalog import normalize_formation
@@ -65,34 +65,47 @@ class ExpiringTestCache:
     def __init__(self, ttl=30):
         self.ttl = ttl
         self.values = {}
+        self.loading_locks = defaultdict(threading.Lock)
         self.lock = threading.Lock()
 
     def get(self, test_id):
         now = time.time()
         key = str(test_id)
+        cached = self._read_cached(key, now)
+        if cached:
+            return cached
+
+        with self.loading_locks[key]:
+            now = time.time()
+            cached = self._read_cached(key, now)
+            if cached:
+                return cached
+
+            test = Test.objects(id=test_id).only(
+                "id",
+                "title",
+                "referentiel",
+                "scheduledDate",
+                "scheduledTime",
+                "duration",
+                "totalQuestions",
+                "status",
+            ).first()
+            if test:
+                with self.lock:
+                    self.values[key] = {
+                        "value": test,
+                        "timestamp": now,
+                    }
+            return test
+
+    def _read_cached(self, key, now):
         with self.lock:
             self._cleanup(now)
             cached = self.values.get(key)
             if cached and now - cached["timestamp"] < self.ttl:
                 return cached["value"]
-
-        test = Test.objects(id=test_id).only(
-            "id",
-            "title",
-            "referentiel",
-            "scheduledDate",
-            "scheduledTime",
-            "duration",
-            "totalQuestions",
-            "status",
-        ).first()
-        if test:
-            with self.lock:
-                self.values[key] = {
-                    "value": test,
-                    "timestamp": now,
-                }
-        return test
+        return None
 
     def _cleanup(self, now):
         expired = [
@@ -162,14 +175,10 @@ class AsyncAccessLogger:
         test = Test.objects(id=payload.get("test_id")).first()
         if not test:
             return
-        test.connectionLogs.append(ConnectionLog(
-            email=payload.get("email") or "unknown",
-            candidateId=payload.get("candidate_id"),
-            connectedAt=datetime.utcnow(),
-            status="connected",
-        ))
-        test.totalConnections = (test.totalConnections or 0) + 1
-        test.save()
+        Test.objects(id=test.id).update_one(
+            inc__totalConnections=1,
+            set__updatedAt=datetime.utcnow(),
+        )
 
 
 class TestAccessService:
