@@ -344,7 +344,7 @@ class InterviewManagementService:
                 token=token,
             )
             responses[user_id] = {
-                "status": "pending",
+                "status": "notified",
                 "roles": roles,
                 "token": token,
                 "notified_at": self.now().isoformat(),

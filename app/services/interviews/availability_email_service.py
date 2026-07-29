@@ -1,4 +1,4 @@
-"""Email notifications for interview jury availability."""
+"""Email notifications for interview jury assignments."""
 
 import logging
 import os
@@ -36,15 +36,11 @@ class InterviewAvailabilityEmailService:
         )
         self.brevo = BrevoEmailService()
 
-    def send_availability_request(self, jury, slot, roles, token):
-        available_link = self._availability_link(token, "available")
-        unavailable_link = self._availability_link(token, "unavailable")
+    def send_availability_request(self, jury, slot, roles, token=None):
         html_content = self._build_html(
             jury=jury,
             slot=slot,
             roles=roles,
-            available_link=available_link,
-            unavailable_link=unavailable_link,
         )
         if self.brevo.is_configured:
             result = self.brevo.send_html(
@@ -54,12 +50,12 @@ class InterviewAvailabilityEmailService:
                         "name": self._jury_name(jury),
                     }
                 ],
-                subject=f"Disponibilité jury - {slot.label}",
+                subject=f"Affectation entretien - {slot.label}",
                 html=html_content,
             )
             if result["sent"]:
                 logging.info(
-                    "Email disponibilité Brevo envoyé à %s pour créneau %s",
+                    "Email affectation jury Brevo envoyé à %s pour créneau %s",
                     jury.email,
                     slot.id,
                 )
@@ -69,7 +65,7 @@ class InterviewAvailabilityEmailService:
 
         if not self.client:
             logging.warning(
-                "SENDGRID_API_KEY non configurée; disponibilité non envoyée à %s",
+                "SENDGRID_API_KEY non configurée; affectation non envoyée à %s",
                 jury.email,
             )
             return False
@@ -77,7 +73,7 @@ class InterviewAvailabilityEmailService:
         message = Mail(
             from_email=Email(self.from_email, "Orange Digital Center"),
             to_emails=To(jury.email),
-            subject=f"Disponibilité jury - {slot.label}",
+            subject=f"Affectation entretien - {slot.label}",
             html_content=Content("text/html", html_content),
         )
 
@@ -85,20 +81,20 @@ class InterviewAvailabilityEmailService:
             response = self.client.send(message)
             if response.status_code in {200, 201, 202}:
                 logging.info(
-                    "Email disponibilité envoyé à %s pour créneau %s",
+                    "Email affectation jury envoyé à %s pour créneau %s",
                     jury.email,
                     slot.id,
                 )
                 return True
             logging.error(
-                "Erreur SendGrid disponibilité %s: statut %s - %s",
+                "Erreur SendGrid affectation jury %s: statut %s - %s",
                 jury.email,
                 response.status_code,
                 sendgrid_response_detail(response),
             )
         except Exception as error:
             logging.exception(
-                "Erreur d'envoi disponibilité à %s: %s",
+                "Erreur d'envoi affectation jury à %s: %s",
                 jury.email,
                 sendgrid_error_detail(error),
             )
@@ -115,14 +111,8 @@ class InterviewAvailabilityEmailService:
             if value
         ).strip()
 
-    def _availability_link(self, token, response):
-        return (
-            f"{self.api_public_url}/api/interviews/availability/"
-            f"{token}?response={response}"
-        )
-
     @staticmethod
-    def _build_html(jury, slot, roles, available_link, unavailable_link):
+    def _build_html(jury, slot, roles):
         jury_name = escape(
             " ".join(
                 value
@@ -142,25 +132,16 @@ class InterviewAvailabilityEmailService:
 
         return f"""
         <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
-          <h2>Confirmation de disponibilité</h2>
+          <h2>Affectation à un créneau d'entretien</h2>
           <p>Bonjour {jury_name},</p>
-          <p>Vous avez été affecté(e) à un créneau d'entretien.</p>
+          <p>Vous avez été affecté(e) à un créneau d'entretien Orange Digital Center Sénégal.</p>
           <ul>
             <li><strong>Créneau :</strong> {escape(slot.label or "-")}</li>
             <li><strong>Date :</strong> {escape(start_at)} - {escape(end_at)}</li>
             <li><strong>Rôle :</strong> {escape(role_text or "-")}</li>
           </ul>
-          <p>Merci de confirmer rapidement votre disponibilité.</p>
-          <p>
-            <a href="{escape(available_link)}"
-               style="display:inline-block;padding:10px 14px;background:#16a34a;color:white;text-decoration:none;border-radius:6px;margin-right:8px">
-              Je suis disponible
-            </a>
-            <a href="{escape(unavailable_link)}"
-               style="display:inline-block;padding:10px 14px;background:#dc2626;color:white;text-decoration:none;border-radius:6px">
-              Je ne suis pas disponible
-            </a>
-          </p>
+          <p>Merci de prendre vos dispositions pour être présent(e) sur ce créneau.</p>
+          <p>En cas d'indisponibilité, répondez directement à ce message ou contactez l'équipe de coordination.</p>
           <p style="font-size:12px;color:#6b7280">Email automatique Orange Digital Center Sénégal.</p>
         </div>
         """
