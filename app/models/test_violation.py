@@ -50,6 +50,7 @@ class TestViolation(Document):
             'createdAt',
             {'fields': ['testId', '-updatedAt']},
             {'fields': ['testId', '-totalViolations']},
+            {'fields': ['testId', 'candidateEmail', '-updatedAt']},
             {'fields': ['candidateEmail', '-updatedAt']},
         ]
     }

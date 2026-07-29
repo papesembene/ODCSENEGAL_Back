@@ -34,6 +34,7 @@ class TestResult(Document):
             'status',
             'completedAt',
             {'fields': ['testId', 'status', '-completedAt']},
+            {'fields': ['testId', 'referentiel', 'status', '-completedAt']},
             {'fields': ['referentiel', 'status', '-completedAt']},
             {'fields': ['candidate.email', '-completedAt']},
         ]

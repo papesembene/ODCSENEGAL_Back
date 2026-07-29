@@ -54,6 +54,7 @@ class Test(Document):
             {'fields': ['referentiel', 'status']},
             {'fields': ['status', 'scheduledDate', 'scheduledTime']},
             {'fields': ['referentiel', '-createdAt']},
+            {'fields': ['referentiel', 'status', '-createdAt']},
         ]
     }
 

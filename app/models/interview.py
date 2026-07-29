@@ -27,7 +27,12 @@ class InterviewCampaign(Document):
 
     meta = {
         "collection": "interview_campaigns",
-        "indexes": ["formation", "status", "created_at"],
+        "indexes": [
+            "formation",
+            "status",
+            "created_at",
+            {"fields": ["formation", "status", "-created_at"]},
+        ],
     }
 
     def to_dict(self):
@@ -68,7 +73,18 @@ class InterviewSlot(Document):
 
     meta = {
         "collection": "interview_slots",
-        "indexes": ["campaign_id", "formation", "start_at", "status"],
+        "indexes": [
+            "campaign_id",
+            "formation",
+            "start_at",
+            "status",
+            "assigned_filter_ids",
+            "assigned_validator_ids",
+            "assigned_motivation_ids",
+            {"fields": ["campaign_id", "formation", "start_at"]},
+            {"fields": ["campaign_id", "status", "start_at"]},
+            {"fields": ["formation", "status", "start_at"]},
+        ],
     }
 
     def to_dict(self):
@@ -137,6 +153,29 @@ class InterviewEvaluation(Document):
             "is_complete",
             "candidate_snapshot.email",
             "candidate_snapshot.desired_training",
+            {
+                "fields": [
+                    "campaign_id",
+                    "candidate_snapshot.desired_training",
+                    "final_status",
+                    "-updated_at",
+                ],
+            },
+            {
+                "fields": [
+                    "campaign_id",
+                    "candidate_snapshot.desired_training",
+                    "interview_progress_status",
+                    "-updated_at",
+                ],
+            },
+            {
+                "fields": [
+                    "slot_id",
+                    "final_status",
+                    "-updated_at",
+                ],
+            },
             {
                 "fields": [
                     "campaign_id",

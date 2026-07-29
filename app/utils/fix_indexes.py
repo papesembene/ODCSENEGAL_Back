@@ -24,7 +24,9 @@ def ensure_critical_indexes():
     from app.models.test import Test
     from app.models.test_group import TestGroup
     from app.models.test_result import TestResult
+    from app.models.test_session import TestSession
     from app.models.test_violation import TestViolation
+    from app.models.interview import InterviewCampaign, InterviewEvaluation, InterviewSlot
     from app.models.portal_content import PortalContent
     from app.models.candidature_campaign import CandidatureCampaign
 
@@ -33,7 +35,11 @@ def ensure_critical_indexes():
         Test,
         TestGroup,
         TestResult,
+        TestSession,
         TestViolation,
+        InterviewCampaign,
+        InterviewSlot,
+        InterviewEvaluation,
         PortalContent,
         CandidatureCampaign,
     )

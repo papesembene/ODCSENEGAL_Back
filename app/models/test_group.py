@@ -39,6 +39,8 @@ class TestGroup(Document):
             'created_at',
             {'fields': ['formation', 'status', '-created_at']},
             {'fields': ['formation', 'status', 'candidate_ids']},
+            {'fields': ['formation', 'test_id', 'status']},
+            {'fields': ['formation', 'test_date']},
             {'fields': ['test_id', 'status']},
         ]
     }

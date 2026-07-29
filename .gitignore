@@ -184,7 +184,14 @@ instance/  # For Flask instance folder (often contains database, config)
  
 # logs
 backend/logs/
+logs/
 *.log
+
+# Runtime uploads
+app/static/uploads/
+
+# Load-test generated data
+load_tests/candidats-*.csv
 
 # executables
 *.exe

@@ -14,7 +14,7 @@ class TestSession(Document):
     lastQuestion = IntField(default=0)
     remainingTime = IntField(default=0)
     status = StringField(
-        choices=["in_progress", "submitted", "expired"],
+        choices=["in_progress", "submitted", "expired", "to_reschedule"],
         default="in_progress",
     )
     startedAt = DateTimeField(default=datetime.utcnow)
@@ -26,6 +26,8 @@ class TestSession(Document):
         "indexes": [
             {"fields": ["testId", "candidateEmail"], "unique": True},
             {"fields": ["testId", "status"]},
+            {"fields": ["testId", "status", "-lastSeenAt"]},
+            {"fields": ["testId", "-lastSeenAt"]},
             {"fields": ["candidateEmail", "-lastSeenAt"]},
             {"fields": ["status", "-lastSeenAt"]},
         ],
