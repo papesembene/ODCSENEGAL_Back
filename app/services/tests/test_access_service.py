@@ -14,6 +14,7 @@ from app.models.candidature import Candidature
 from app.models.test import ConnectionLog, Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
+from app.services.tests.formation_catalog import normalize_formation
 
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,7 @@ class TestAccessService:
         rate_limit_prefix,
         allow_existing_result=False,
         skip_rate_limit=False,
+        late_submission_grace_seconds=0,
     ):
         email = (email or "").strip().lower()
         phone = (phone or "").strip()
@@ -271,8 +273,8 @@ class TestAccessService:
         }
         if (
             str(candidature.id) not in candidate_ids
-            or self._normalize(group.formation)
-            != self._normalize(test.referentiel)
+            or normalize_formation(group.formation)
+            != normalize_formation(test.referentiel)
         ):
             self._deny(test_id, email, ip, "not_in_group")
             raise TestAccessError(
@@ -281,7 +283,10 @@ class TestAccessService:
                 403,
             )
 
-        self._validate_time_window(test)
+        self._validate_time_window(
+            test,
+            late_submission_grace_seconds=late_submission_grace_seconds,
+        )
         return {
             "candidate": {
                 "id": str(candidature.id),
@@ -321,6 +326,7 @@ class TestAccessService:
             ip=ip,
             rate_limit_prefix="submit",
             allow_existing_result=True,
+            late_submission_grace_seconds=600,
         )
 
     def validate_draft(self, test_id, email, phone, ip="draft"):
@@ -358,7 +364,7 @@ class TestAccessService:
             )
         return "Le test est toujours en cours", test.status
 
-    def _validate_time_window(self, test):
+    def _validate_time_window(self, test, late_submission_grace_seconds=0):
         if not (
             test.scheduledDate
             and test.scheduledTime
@@ -371,7 +377,10 @@ class TestAccessService:
                 "%Y-%m-%d %H:%M",
             )
             end = start + timedelta(minutes=int(test.duration))
-            if not start <= datetime.now() <= end:
+            latest_allowed = end + timedelta(
+                seconds=max(int(late_submission_grace_seconds or 0), 0)
+            )
+            if not start <= datetime.now() <= latest_allowed:
                 raise TestAccessError("Test non accessible", 403)
         except TestAccessError:
             raise

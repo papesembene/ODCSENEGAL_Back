@@ -53,6 +53,51 @@ def get_all_tests():
             'success': False,
             'error': f"Erreur lors de la récupération des tests : {str(e)}"
         }), 500
+
+
+@test_bp.route('/tests/sessions', methods=['GET'])
+@admin_required({'competences', 'super_admin'})
+def get_test_sessions():
+    try:
+        payload = test_session_service.list_admin_sessions({
+            "status": request.args.get("status"),
+            "testId": request.args.get("testId"),
+            "search": request.args.get("search"),
+            "page": request.args.get("page"),
+            "per_page": request.args.get("per_page"),
+        })
+        return jsonify({
+            "success": True,
+            **payload,
+        }), 200
+    except TestSessionServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), error.status_code
+    except Exception:
+        logger.exception("Erreur lors de la récupération des sessions de test")
+        return jsonify({
+            "success": False,
+            "error": "Erreur lors de la récupération des sessions de test",
+        }), 500
+
+
+@test_bp.route('/tests/sessions/<session_id>/reschedule', methods=['PATCH'])
+@admin_required({'competences', 'super_admin'})
+def mark_test_session_for_reschedule(session_id):
+    try:
+        session = test_session_service.mark_for_reschedule(session_id)
+        return jsonify({
+            "success": True,
+            "message": "Session marquée à reprogrammer",
+            "data": session.to_dict(),
+        }), 200
+    except TestSessionServiceError as error:
+        return jsonify({"success": False, "error": str(error)}), error.status_code
+    except Exception:
+        logger.exception("Erreur lors du marquage à reprogrammer")
+        return jsonify({
+            "success": False,
+            "error": "Erreur lors du marquage à reprogrammer",
+        }), 500
  
 @test_bp.route('/tests/<test_id>', methods=['GET'])
 def get_test(test_id):
@@ -281,7 +326,8 @@ def save_test_session_draft(test_id):
             "success": False,
             "error": "Erreur lors de la sauvegarde du brouillon",
         }), 500
- 
+
+
 @test_bp.route('/tests/results/<result_id>', methods=['PUT', 'PATCH'])
 @admin_required({'competences', 'super_admin'})
 def update_result(result_id):

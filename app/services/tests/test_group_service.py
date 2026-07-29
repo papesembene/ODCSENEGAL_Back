@@ -8,6 +8,7 @@ from app.models.candidature import Candidature
 from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.services.test_email_service import TestEmailService
+from app.services.tests.formation_catalog import FORMATIONS, formation_aliases
 
 
 class TestGroupServiceError(Exception):
@@ -17,15 +18,7 @@ class TestGroupServiceError(Exception):
 
 
 class TestGroupService:
-    FORMATIONS = (
-        "Dev Web",
-        "Data",
-        "Hackeuse",
-        "AWS",
-        "Référent Digital",
-        "Cyber security",
-        "Intelligence Artificielle",
-    )
+    FORMATIONS = FORMATIONS
     UPDATE_FIELDS = (
         "name",
         "formation",
@@ -40,9 +33,11 @@ class TestGroupService:
     def list_groups(formation=None, status=None):
         filters = {}
         if formation and formation != "all":
-            filters["formation"] = formation
+            filters["formation__in"] = formation_aliases(formation)
         if status and status != "all":
             filters["status"] = status
+        else:
+            filters["status__ne"] = "cancelled"
         groups = TestGroup.objects(**filters).order_by("-created_at")
         return [
             TestGroupService._serialize_group(group, compact=True)
@@ -66,8 +61,9 @@ class TestGroupService:
         if not formation:
             raise TestGroupServiceError("Le référentiel est requis")
 
+        aliases = formation_aliases(formation)
         assigned_ids = TestGroupService._assigned_candidate_ids(formation)
-        query = Candidature.objects(desired_training=formation)
+        query = Candidature.objects(desired_training__in=aliases)
         if assigned_ids:
             query = query.filter(id__nin=list(assigned_ids))
         if search:
@@ -216,7 +212,7 @@ class TestGroupService:
     @staticmethod
     def get_statistics(formation=None):
         filters = (
-            {"formation": formation}
+            {"formation__in": formation_aliases(formation)}
             if formation and formation != "all"
             else {}
         )
@@ -226,7 +222,7 @@ class TestGroupService:
         for item in TestGroupService.FORMATIONS:
             payload["formationStats"][item] = (
                 TestGroupService._group_counts(
-                    TestGroup.objects(formation=item),
+                    TestGroup.objects(formation__in=formation_aliases(item)),
                 )
             )
         return payload
@@ -276,7 +272,7 @@ class TestGroupService:
     def _assigned_candidate_ids(formation):
         assigned_ids = set()
         groups = TestGroup.objects(
-            formation=formation,
+            formation__in=formation_aliases(formation),
             status__ne="cancelled",
         ).only("candidate_ids")
 
@@ -300,7 +296,7 @@ class TestGroupService:
     ):
         candidate_id_set = set(candidate_ids)
         groups = TestGroup.objects(
-            formation=formation,
+            formation__in=formation_aliases(formation),
             status__ne="cancelled",
             candidate_ids__in=candidate_ids,
         ).only("name", "candidate_ids")
