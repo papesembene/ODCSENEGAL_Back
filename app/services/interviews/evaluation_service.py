@@ -63,11 +63,11 @@ class InterviewEvaluationService:
                 "les candidats."
             )
 
-        slots = self._staffed_slots(campaign_id, formation)
+        slots = self._planning_slots(campaign_id, formation)
         if not slots:
             raise InterviewValidationError(
-                "Aucun créneau complet. Affectez d'abord les trois "
-                "rôles jury à un créneau."
+                "Aucun créneau planifiable. Créez au moins un créneau "
+                "actif pour cette campagne."
             )
         candidates = list(
             Candidature.objects(
@@ -250,19 +250,12 @@ class InterviewEvaluationService:
         return [role] if role else []
 
     @staticmethod
-    def _staffed_slots(campaign_id, formation):
-        slots = InterviewSlot.objects(
+    def _planning_slots(campaign_id, formation):
+        return list(InterviewSlot.objects(
             campaign_id=campaign_id,
             formation=formation,
             status__in=["scheduled", "in_progress"],
-        ).order_by("start_at")
-        return [
-            slot
-            for slot in slots
-            if (slot.assigned_filter_ids or slot.assigned_jury_ids)
-            and slot.assigned_validator_ids
-            and slot.assigned_motivation_ids
-        ]
+        ).order_by("start_at"))
 
     def _admitted_emails(self, candidates):
         emails = [item.email for item in candidates if item.email]

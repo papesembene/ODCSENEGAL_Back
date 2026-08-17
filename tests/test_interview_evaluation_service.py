@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app.services.interviews.evaluation_service import (
     InterviewEvaluationService,
@@ -38,6 +39,30 @@ class InterviewEvaluationServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(limit, 50)
+
+    def test_planning_slots_do_not_require_all_jury_roles(self):
+        slots = [
+            SimpleNamespace(
+                id="slot-1",
+                assigned_filter_ids=[],
+                assigned_validator_ids=["coach-1"],
+                assigned_motivation_ids=[],
+            )
+        ]
+        query = Mock()
+        query.order_by.return_value = slots
+
+        with patch(
+            "app.services.interviews.evaluation_service.InterviewSlot.objects",
+            return_value=query,
+        ):
+            result = InterviewEvaluationService._planning_slots(
+                "campaign-1",
+                "hackeuses",
+            )
+
+        self.assertEqual(["slot-1"], [slot.id for slot in result])
+        query.order_by.assert_called_once_with("start_at")
 
     def test_member_cannot_edit_unassigned_evaluation(self):
         service = InterviewEvaluationService()
