@@ -1,6 +1,9 @@
 """Read models and query helpers for interview endpoints."""
 
+import csv
+import io
 import re
+from datetime import UTC, datetime
 
 from bson import ObjectId
 
@@ -153,6 +156,61 @@ class InterviewQueryService:
                 ).count(),
             },
         }
+
+    def export_evaluations_csv(self, request_args, current_admin=None):
+        query = self.build_evaluation_query(
+            request_args,
+            current_admin=current_admin,
+        )
+        rows = self.serialize_evaluations(query)
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow([
+            "Nom",
+            "Email",
+            "Téléphone",
+            "Référentiel",
+            "Campagne",
+            "Créneau",
+            "Score test",
+            "Infractions",
+            "Avis filtreur",
+            "Avis coach",
+            "Badges coach",
+            "Avis motivation",
+            "Statut entretien",
+            "Décision finale",
+            "Fiche complète",
+        ])
+
+        for row in rows:
+            candidate = row.get("candidate_snapshot") or {}
+            writer.writerow([
+                self._candidate_name(candidate),
+                candidate.get("email", ""),
+                candidate.get("phone", ""),
+                candidate.get("desired_training", ""),
+                row.get("campaign_name", ""),
+                self._slot_label(row),
+                row.get("test_score", ""),
+                self._violation_count(row),
+                self._review_summary(row, "filter"),
+                self._review_summary(row, "validator"),
+                self._coach_badges(row),
+                self._review_summary(row, "motivation"),
+                self._progress_label(row.get("interview_progress_status")),
+                self._final_status_label(row.get("final_status")),
+                "Oui" if row.get("is_complete") else "Non",
+            ])
+
+        filename = "entretiens"
+        formation = (request_args.get("formation") or "").strip()
+        if formation and formation != "all":
+            filename = f"{filename}-{formation}"
+        filename = f"{filename}-{datetime.now(UTC).strftime('%Y%m%d')}.csv"
+        return "\ufeff" + output.getvalue(), filename
+
     @staticmethod
     def build_candidate_snapshot(candidate):
         return {
@@ -262,11 +320,24 @@ class InterviewQueryService:
             for evaluation in evaluation_list
             if evaluation.campaign_id
         }
+        slot_ids = {
+            evaluation.slot_id
+            for evaluation in evaluation_list
+            if evaluation.slot_id
+        }
         campaigns_by_id = {
             str(campaign.id): campaign
             for campaign in (
                 InterviewCampaign.objects(id__in=list(campaign_ids))
                 if campaign_ids
+                else []
+            )
+        }
+        slots_by_id = {
+            str(slot.id): slot
+            for slot in (
+                InterviewSlot.objects(id__in=list(slot_ids))
+                if slot_ids
                 else []
             )
         }
@@ -334,8 +405,14 @@ class InterviewQueryService:
         for evaluation in evaluation_list:
             payload = evaluation.to_dict()
             campaign = campaigns_by_id.get(evaluation.campaign_id)
+            slot = slots_by_id.get(evaluation.slot_id)
+            payload["campaign_name"] = campaign.name if campaign else ""
             payload["campaign_scorecard_config"] = (
                 campaign.scorecard_config if campaign else {}
+            )
+            payload["slot_label"] = slot.label if slot else ""
+            payload["slot_start_at"] = (
+                slot.start_at.isoformat() if slot and slot.start_at else None
             )
             candidate = candidates_by_id.get(evaluation.candidature_id)
             if not payload.get("candidate_snapshot") and candidate:
@@ -361,6 +438,82 @@ class InterviewQueryService:
             payloads.append(payload)
 
         return payloads
+
+    @staticmethod
+    def _candidate_name(candidate):
+        return " ".join(
+            item for item in [
+                candidate.get("first_name"),
+                candidate.get("last_name"),
+            ] if item
+        ) or candidate.get("email", "")
+
+    @staticmethod
+    def _slot_label(row):
+        label = row.get("slot_label") or ""
+        start_at = row.get("slot_start_at") or ""
+        if label and start_at:
+            return f"{label} ({start_at})"
+        return label or start_at
+
+    @staticmethod
+    def _section_review(row, section_key):
+        legacy_fields = {
+            "filter": "filter_review",
+            "validator": "validator_review",
+            "motivation": "motivation_review",
+        }
+        return (
+            (row.get("section_reviews") or {}).get(section_key)
+            or row.get(legacy_fields.get(section_key), {})
+            or {}
+        )
+
+    def _review_summary(self, row, section_key):
+        review = self._section_review(row, section_key)
+        decision = (
+            review.get("decision")
+            or review.get("verdict")
+            or review.get("status")
+            or ""
+        )
+        comment = review.get("comment") or review.get("notes") or ""
+        if decision and comment:
+            return f"{decision} - {comment}"
+        return decision or comment
+
+    def _coach_badges(self, row):
+        review = self._section_review(row, "validator")
+        badges = [
+            ("coach_pick", "Coup de coeur"),
+            ("strong_potential", "Potentiel fort"),
+            ("cohort_balance", "Équilibre cohorte"),
+            ("social_context", "Contexte social"),
+        ]
+        return ", ".join(label for key, label in badges if review.get(key))
+
+    @staticmethod
+    def _violation_count(row):
+        violations = ((row.get("test_details") or {}).get("violations") or {})
+        return violations.get("totalViolations", 0)
+
+    @staticmethod
+    def _progress_label(value):
+        return {
+            "a_planifier": "À planifier",
+            "planifie": "Planifié",
+            "passe": "Passé",
+            "absent": "Absent",
+        }.get(value, value or "")
+
+    @staticmethod
+    def _final_status_label(value):
+        return {
+            "en_attente": "En attente",
+            "retenu": "Retenu",
+            "liste_attente": "Liste d'attente",
+            "rejete": "Rejeté",
+        }.get(value, value or "")
 
     def serialize_test_details(
         self,

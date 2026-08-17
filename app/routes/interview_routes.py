@@ -1,4 +1,4 @@
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 from app.services.interviews.evaluation_service import (
     InterviewEvaluationService,
@@ -182,6 +182,22 @@ def get_interview_evaluations():
         getattr(g, "current_admin", None),
     )
     return jsonify({"success": True, **page}), 200
+
+
+@interview_bp.route("/interviews/evaluations/export", methods=["GET"])
+@admin_required(ADMIN_TYPES)
+def export_interview_evaluations():
+    csv_content, filename = query_service.export_evaluations_csv(
+        request.args,
+        getattr(g, "current_admin", None),
+    )
+    return Response(
+        csv_content,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+        },
+    )
 
 
 @interview_bp.route(
