@@ -17,9 +17,15 @@ from app.models.test_result import TestResult
 from app.models.test import Test
 from app.models.test_violation import TestViolation
 from app.models.user import User
+from app.services.interviews.access_policy import (
+    is_interview_member, slot_access, utc_iso, visible_slots_condition,
+)
 
 
 class InterviewQueryService:
+    def __init__(self, now=None):
+        self.now = now or datetime.utcnow
+
     def bootstrap(self, formation=None, current_admin=None):
         campaigns = list(self.list_campaign_documents(formation))
         campaign_ids = [str(item.id) for item in campaigns]
@@ -56,11 +62,12 @@ class InterviewQueryService:
             "campaigns": [
                 self.serialize_campaign(item) for item in campaigns
             ],
-            "slots": [item.to_dict() for item in slots],
+            "slots": [self.serialize_slot(item, current_admin) for item in slots],
             "admins": [
                 self.serialize_admin_user(item) for item in admins
             ],
             "slot_occupancy": occupancy,
+            "server_now": utc_iso(self.now()),
         }
 
     def member_capabilities(self, current_admin):
@@ -93,18 +100,30 @@ class InterviewQueryService:
         query = InterviewCampaign.objects.order_by("-created_at")
         return query.filter(formation=formation) if formation else query
 
-    def list_campaigns(self, formation=None):
+    def list_campaigns(self, formation=None, current_admin=None):
+        campaigns = self.list_campaign_documents(formation)
+        if self._is_interview_member(current_admin):
+            slots = self._filter_slots_for_admin(InterviewSlot.objects, current_admin)
+            campaign_ids = set(slots.distinct("campaign_id"))
+            campaigns = [item for item in campaigns if str(item.id) in campaign_ids]
         return [
             self.serialize_campaign(item)
-            for item in self.list_campaign_documents(formation)
+            for item in campaigns
         ]
 
-    @staticmethod
-    def list_slots(campaign_id=None):
+    def list_slots(self, campaign_id=None, current_admin=None):
         query = InterviewSlot.objects.order_by("start_at")
         if campaign_id:
             query = query.filter(campaign_id=campaign_id)
-        return [item.to_dict() for item in query]
+        if self._is_interview_member(current_admin):
+            query = self._filter_slots_for_admin(query, current_admin)
+        return [self.serialize_slot(item, current_admin) for item in query]
+
+    def serialize_slot(self, slot, current_admin=None):
+        payload = slot.to_dict()
+        if self._is_interview_member(current_admin):
+            payload["access"] = slot_access(slot, current_admin, self.now())
+        return payload
 
     def evaluation_page(
         self,
@@ -269,6 +288,9 @@ class InterviewQueryService:
         query = InterviewEvaluation.objects.order_by("-updated_at")
         if campaign_id:
             query = query.filter(campaign_id=campaign_id)
+        slot_id = request_args.get("slotId")
+        if slot_id and slot_id != "all":
+            query = query.filter(slot_id=slot_id)
         if status and status != "all":
             query = query.filter(final_status=status)
         if progress and progress != "all":
@@ -615,40 +637,17 @@ class InterviewQueryService:
 
     @staticmethod
     def _is_interview_member(current_admin):
-        return bool(
-            current_admin
-            and current_admin.admin_type != "super_admin"
-            and (current_admin.profile_data or {}).get("admin_scope")
-            == "interview_member"
-        )
+        return is_interview_member(current_admin)
 
-    @staticmethod
-    def _get_assigned_slot_ids(current_admin):
-        admin_id = str(current_admin.id)
-        assigned_slots = InterviewSlot.objects(
-            __raw__={
-                "$or": [
-                    {"assigned_filter_ids": admin_id},
-                    {"assigned_jury_ids": admin_id},
-                    {"assigned_validator_ids": admin_id},
-                    {"assigned_motivation_ids": admin_id},
-                ],
-            },
+    def _get_assigned_slot_ids(self, current_admin):
+        assigned_slots = self._filter_slots_for_admin(
+            InterviewSlot.objects, current_admin,
         ).only("id")
         return [str(slot.id) for slot in assigned_slots]
 
-    @staticmethod
-    def _filter_slots_for_admin(query, current_admin):
-        admin_id = str(current_admin.id)
+    def _filter_slots_for_admin(self, query, current_admin):
         return query.filter(
-            __raw__={
-                "$or": [
-                    {"assigned_filter_ids": admin_id},
-                    {"assigned_jury_ids": admin_id},
-                    {"assigned_validator_ids": admin_id},
-                    {"assigned_motivation_ids": admin_id},
-                ]
-            }
+            __raw__=visible_slots_condition(current_admin, self.now()),
         )
 
     @staticmethod

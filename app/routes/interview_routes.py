@@ -3,7 +3,7 @@ from flask import Blueprint, Response, g, jsonify, request
 from app.services.interviews.evaluation_service import (
     InterviewEvaluationService,
 )
-from app.services.interviews.exceptions import InterviewError
+from app.services.interviews.exceptions import InterviewError, InterviewForbiddenError
 from app.services.interviews.management_service import (
     InterviewManagementService,
 )
@@ -23,6 +23,11 @@ def _error_response(error):
     return jsonify(
         {"success": False, "error": str(error)}
     ), error.status_code
+
+
+def _require_planning_admin():
+    if query_service._is_interview_member(getattr(g, "current_admin", None)):
+        raise InterviewForbiddenError("La planification est réservée aux administrateurs.")
 
 
 @interview_bp.route("/interviews/bootstrap", methods=["GET"])
@@ -55,7 +60,8 @@ def get_interview_campaigns():
         {
             "success": True,
             "data": query_service.list_campaigns(
-                request.args.get("formation")
+                request.args.get("formation"),
+                getattr(g, "current_admin", None),
             ),
         }
     ), 200
@@ -65,6 +71,7 @@ def get_interview_campaigns():
 @admin_required(ADMIN_TYPES)
 def create_interview_campaign():
     try:
+        _require_planning_admin()
         campaign = management_service.create_campaign(
             request.get_json(silent=True) or {}
         )
@@ -82,9 +89,12 @@ def create_interview_campaign():
 @admin_required(ADMIN_TYPES)
 def update_interview_campaign(campaign_id):
     try:
+        data = request.get_json(silent=True) or {}
+        if set(data) - {"filter_questions"}:
+            _require_planning_admin()
         campaign = management_service.update_campaign(
             campaign_id,
-            request.get_json(silent=True) or {},
+            data,
             current_admin=getattr(g, "current_admin", None),
         )
         return jsonify(
@@ -101,7 +111,8 @@ def get_interview_slots():
         {
             "success": True,
             "data": query_service.list_slots(
-                request.args.get("campaignId")
+                request.args.get("campaignId"),
+                getattr(g, "current_admin", None),
             ),
         }
     ), 200
@@ -111,6 +122,7 @@ def get_interview_slots():
 @admin_required(ADMIN_TYPES)
 def create_interview_slot():
     try:
+        _require_planning_admin()
         slot = management_service.create_slot(
             request.get_json(silent=True) or {}
         )
@@ -128,6 +140,7 @@ def create_interview_slot():
 @admin_required(ADMIN_TYPES)
 def update_interview_slot(slot_id):
     try:
+        _require_planning_admin()
         slot = management_service.update_slot(
             slot_id,
             request.get_json(silent=True) or {},
@@ -207,6 +220,7 @@ def export_interview_evaluations():
 @admin_required(ADMIN_TYPES)
 def seed_interview_evaluations():
     try:
+        _require_planning_admin()
         result = evaluation_service.seed(
             request.get_json(silent=True) or {}
         )

@@ -19,6 +19,7 @@ from app.services.interviews.exceptions import (
     InterviewValidationError,
 )
 from app.services.interviews.query_service import InterviewQueryService
+from app.services.interviews.access_policy import filter_window_open, slot_roles
 from app.services.interviews.scorecard_service import (
     is_evaluation_complete,
     is_scorecard_ready,
@@ -32,12 +33,6 @@ class InterviewEvaluationService:
         "validator": "validator_review",
         "motivation": "motivation_review",
     }
-    ASSIGNED_FIELD_BY_ROLE = {
-        "filter": "assigned_filter_ids",
-        "validator": "assigned_validator_ids",
-        "motivation": "assigned_motivation_ids",
-    }
-
     def __init__(self, query_service=None, now=None):
         self.query_service = query_service or InterviewQueryService()
         self.now = now or datetime.utcnow
@@ -185,18 +180,17 @@ class InterviewEvaluationService:
 
         for role in requested_roles:
             review_field = self.REVIEW_FIELD_BY_ROLE.get(role)
-            assigned_field = self.ASSIGNED_FIELD_BY_ROLE.get(role)
-            assigned_ids = (
-                getattr(slot, assigned_field, [])
-                if slot and assigned_field
-                else []
-            )
             if (
                 not review_field
-                or str(current_admin.id) not in (assigned_ids or [])
+                or role not in slot_roles(slot, current_admin)
             ):
                 raise InterviewForbiddenError(
                     "Cette fiche ne vous est pas affectée"
+                )
+            if role == "filter" and not filter_window_open(slot, self.now()):
+                raise InterviewForbiddenError(
+                    "La saisie filtreur est autorisée uniquement pendant "
+                    "le créneau. Celui-ci n'a pas commencé ou est terminé."
                 )
             existing_review = (
                 section_reviews.get(role)
