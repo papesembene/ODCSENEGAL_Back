@@ -1,6 +1,5 @@
 """Test definitions, results and statistics use cases."""
 
-from collections import defaultdict
 from datetime import datetime
 import re
 
@@ -8,6 +7,7 @@ from mongoengine.errors import ValidationError
 
 from app.models.test import Question, Test
 from app.models.test_result import Candidate, TestResult
+from app.services.tests.test_scoring import calculate_test_score
 
 
 class TestServiceError(Exception):
@@ -99,31 +99,17 @@ class TestManagementService:
         test.delete()
 
     @staticmethod
-    def list_results(filters):
-        query = {
-            key: value
-            for key, value in filters.items()
-            if value
-        }
-        return [
-            result.to_dict()
-            for result in TestResult.objects(**query).order_by(
-                "-completedAt",
-            )
-        ]
-
-    @staticmethod
     def get_result(result_id):
         result = TestResult.objects(id=result_id).first()
         if not result:
             raise TestServiceError("Résultat non trouvé", 404)
         return result
 
-    def submit_result(self, data):
+    def submit_result(self, data, *, trusted_import=False):
         data = data or {}
         self._require_fields(
             data,
-            ("testId", "testTitle", "referentiel", "candidate", "score"),
+            ("testId", "candidate"),
         )
         candidate_data = data.get("candidate") or {}
         self._require_fields(
@@ -142,26 +128,40 @@ class TestManagementService:
         if existing_result:
             return existing_result, False
 
-        passing_score = data.get("passingScore", 70)
+        test = Test.objects(id=data["testId"]).only(
+            "title", "referentiel", "passingScore", "questions.type",
+            "questions.correctAnswer", "questions.correctAnswers", "questions.score",
+        ).first()
+        if not test:
+            raise TestServiceError("Test non trouve", 404)
+        answers = data.get("answers", {})
+        if not isinstance(answers, dict):
+            raise TestServiceError("Reponses invalides", 400)
+        score = calculate_test_score(test.questions, answers)
+        if trusted_import:
+            score = data.get("score")
+            if type(score) is not int or not 0 <= score <= 100:
+                raise TestServiceError("La note importee doit etre un entier entre 0 et 100", 400)
+        passing_score = test.passingScore
         result = TestResult(
             testId=data["testId"],
-            testTitle=data["testTitle"],
-            referentiel=data["referentiel"],
+            testTitle=test.title,
+            referentiel=test.referentiel,
             candidate=Candidate(
                 name=candidate_data["name"],
                 email=candidate_email,
                 phone=candidate_data["phone"],
             ),
-            answers=data.get("answers", {}),
-            score=data["score"],
+            answers=answers,
+            score=score,
             status=(
                 "admis"
-                if data["score"] >= passing_score
+                if score >= passing_score
                 else "rejeté"
             ),
             submittedDate=data.get("submittedDate", ""),
             submittedTime=data.get("submittedTime", ""),
-            manualGrades=data.get("manualGrades", {}),
+            manualGrades={},
         )
         try:
             result.save()
@@ -205,65 +205,15 @@ class TestManagementService:
 
     @staticmethod
     def get_statistics(referentiel=None):
-        query = {"referentiel": referentiel} if referentiel else {}
-        results = TestResult.objects(**query)
-        total = results.count()
-        admitted = results.filter(status="admis").count()
-        rejected = results.filter(status="rejeté").count()
-        pending = results.filter(status="pending").count()
-        scores = [result.score for result in results]
-        average = sum(scores) / len(scores) if scores else 0
-        return {
-            "total": total,
-            "admis": admitted,
-            "rejetes": rejected,
-            "pending": pending,
-            "average_score": round(average, 2),
-            "pass_rate": round(
-                (admitted / total * 100) if total else 0,
-                2,
-            ),
-        }
+        from app.services.tests.test_result_queries import TestResultQueries
+        return TestResultQueries.statistics({"referentiel": referentiel})
 
     @staticmethod
     def get_performance_statistics(now=None):
+        from app.services.tests.test_result_queries import TestResultQueries
         now = now or datetime.utcnow()
         all_results = TestResult.objects()
-        by_referential = defaultdict(lambda: {
-            "total": 0,
-            "admis": 0,
-            "rejetes": 0,
-            "pending": 0,
-            "total_score": 0,
-            "average_score": 0,
-            "pass_rate": 0,
-        })
-        for result in all_results:
-            stats = by_referential[result.referentiel or "Non spécifié"]
-            stats["total"] += 1
-            stats["total_score"] += result.score or 0
-            if result.status == "admis":
-                stats["admis"] += 1
-            elif result.status == "rejeté":
-                stats["rejetes"] += 1
-            else:
-                stats["pending"] += 1
-
-        performance = []
-        for referential, stats in by_referential.items():
-            if stats["total"]:
-                stats["average_score"] = round(
-                    stats["total_score"] / stats["total"],
-                    2,
-                )
-                stats["pass_rate"] = round(
-                    stats["admis"] / stats["total"] * 100,
-                    2,
-                )
-            performance.append({
-                "referentiel": referential,
-                **stats,
-            })
+        performance = TestResultQueries.performance_by_referential()
 
         monthly = []
         month_names = (

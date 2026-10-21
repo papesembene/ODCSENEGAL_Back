@@ -1,6 +1,7 @@
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.services.tests.test_group_service import (
     TestGroupService,
@@ -14,6 +15,53 @@ class FakeGroupQuerySet(list):
 
 
 class TestGroupServiceUnitTest(unittest.TestCase):
+    def test_local_invitations_are_simulated_only_without_a_provider(self):
+        module = "app.services.tests.test_group_service"
+        for configured in (True, False):
+            with self.subTest(email_provider_configured=configured):
+                service = TestGroupService()
+                group = SimpleNamespace(
+                    test_id="test-1",
+                    candidate_ids=["candidate-1"],
+                    test_date=datetime(2026, 6, 25, 10),
+                    duration=60,
+                    status="pending",
+                    save=Mock(),
+                )
+                email_service = SimpleNamespace(
+                    sendgrid_api_key=None,
+                    is_configured=configured,
+                    send_bulk_invitations=Mock(return_value={
+                        "success": True, "sent": 1, "failed": 0,
+                    }),
+                )
+                with (
+                    patch.object(service, "get_group", return_value=group),
+                    patch(f"{module}.Test.objects") as tests,
+                    patch(f"{module}.Candidature.objects", return_value=[
+                        SimpleNamespace(email="candidate@example.com"),
+                    ]),
+                    patch(f"{module}.TestEmailService", return_value=email_service),
+                ):
+                    tests.return_value.first.return_value = SimpleNamespace(
+                        id="test-1", title="Test",
+                    )
+                    result = service.send_invitations(
+                        "group-1", "http://localhost:3001", simulate=True,
+                    )
+
+                self.assertEqual(result["status_code"], 200)
+                self.assertEqual(
+                    result["payload"]["data"].get("simulated", False),
+                    not configured,
+                )
+                self.assertEqual(
+                    email_service.send_bulk_invitations.call_count,
+                    int(configured),
+                )
+                self.assertEqual(group.status, "scheduled")
+                group.save.assert_called_once()
+
     def test_date_parser_accepts_iso(self):
         value = TestGroupService._parse_date(
             "2026-06-25T10:00:00Z",

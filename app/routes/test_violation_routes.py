@@ -1,4 +1,6 @@
 from flask import Blueprint, jsonify, request
+from app.utils.auth_decorators import admin_required
+from app.services.tests.test_access_service import TestAccessError, TestAccessService
 
 from app.services.tests.test_violation_service import (
     TestViolationService,
@@ -8,6 +10,7 @@ from app.services.tests.test_violation_service import (
 
 test_violation_bp = Blueprint("test_violations", __name__)
 test_violation_service = TestViolationService()
+violation_access_service = TestAccessService()
 
 
 def violation_error_response(error):
@@ -23,9 +26,15 @@ def violation_error_response(error):
 )
 def log_violation(test_id):
     try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(success=False, error="Donnees invalides"), 400
+        violation_access_service.validate_draft(
+            test_id, data.get("candidateEmail"), data.get("candidatePhone"), request.remote_addr or "unknown",
+        )
         violation = test_violation_service.log(
             test_id,
-            request.get_json() or {},
+            data,
         )
         return jsonify({
             "success": True,
@@ -37,6 +46,8 @@ def log_violation(test_id):
         }), 201
     except TestViolationServiceError as error:
         return violation_error_response(error)
+    except TestAccessError as error:
+        return jsonify(success=False, error=str(error)), error.status_code
     except Exception as error:
         return jsonify({
             "success": False,
@@ -48,6 +59,7 @@ def log_violation(test_id):
     "/tests/<test_id>/violations",
     methods=["GET"],
 )
+@admin_required({"competences", "super_admin"})
 def get_test_violations(test_id):
     try:
         violations = test_violation_service.list_for_test(test_id)
@@ -67,6 +79,7 @@ def get_test_violations(test_id):
     "/tests/<test_id>/violations/<candidate_email>",
     methods=["GET"],
 )
+@admin_required({"competences", "super_admin"})
 def get_candidate_violations(test_id, candidate_email):
     try:
         violation = test_violation_service.get_for_candidate(
@@ -91,6 +104,7 @@ def get_candidate_violations(test_id, candidate_email):
 
 
 @test_violation_bp.route("/violations/all", methods=["GET"])
+@admin_required({"competences", "super_admin"})
 def get_all_violations():
     try:
         violations = test_violation_service.list_all()
@@ -110,6 +124,7 @@ def get_all_violations():
     "/tests/<test_id>/violations/<candidate_email>",
     methods=["DELETE"],
 )
+@admin_required({"competences", "super_admin"})
 def delete_candidate_violations(test_id, candidate_email):
     try:
         test_violation_service.delete_for_candidate(

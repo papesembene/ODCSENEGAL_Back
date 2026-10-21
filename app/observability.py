@@ -9,7 +9,59 @@ import socket
 import time
 import uuid
 
-from flask import g, has_request_context, request
+from flask import Response, abort, g, has_request_context, request
+from mongoengine.connection import get_db
+from app.runtime_config import redis_client
+
+try:
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
+    )
+except ImportError:  # pragma: no cover - dependency is installed in deploy env
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
+    Counter = Gauge = Histogram = None
+    generate_latest = None
+
+
+REQUEST_COUNT = (
+    Counter(
+        "odc_http_requests_total",
+        "Total HTTP requests processed by the ODC backend.",
+        ["method", "endpoint", "status"],
+    )
+    if Counter
+    else None
+)
+REQUEST_LATENCY = (
+    Histogram(
+        "odc_http_request_duration_seconds",
+        "HTTP request duration in seconds.",
+        ["method", "endpoint", "status"],
+        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
+    )
+    if Histogram
+    else None
+)
+MONGODB_UP = (
+    Gauge(
+        "odc_mongodb_up",
+        "MongoDB availability. 1 means reachable, 0 means unavailable.",
+    )
+    if Gauge
+    else None
+)
+HEALTH_STATUS = (
+    Gauge(
+        "odc_backend_health",
+        "Backend health status. 1 means healthy, 0 means degraded.",
+    )
+    if Gauge
+    else None
+)
 
 
 class JsonFormatter(logging.Formatter):
@@ -35,6 +87,11 @@ class JsonFormatter(logging.Formatter):
             "endpoint",
             "status_code",
             "response_time_ms",
+            "test_id",
+            "candidate_email",
+            "candidate_phone",
+            "test_session_status",
+            "idempotent",
         ):
             value = getattr(record, key, None)
             if value is not None:
@@ -58,7 +115,7 @@ def configure_observability(app):
     log_dir = os.getenv("LOG_DIR", "logs")
     logger = _configure_logging(log_dir)
     apm_enabled = _configure_apm(app, logger)
-    ignored_paths = {"/health", "/favicon.ico"}
+    ignored_paths = {"/health", "/metrics", "/favicon.ico"}
 
     @app.before_request
     def start_request_trace():
@@ -81,13 +138,15 @@ def configure_observability(app):
         duration = (
             time.perf_counter()
             - getattr(g, "request_started_at", time.perf_counter())
-        ) * 1000
+        )
+        duration_ms = duration * 1000
         response.headers["X-Request-ID"] = getattr(
             g,
             "request_id",
             "",
         )
-        response.headers["X-Response-Time"] = f"{duration:.2f}ms"
+        response.headers["X-Response-Time"] = f"{duration_ms:.2f}ms"
+        _record_http_metrics(response.status_code, duration)
         if request.path not in ignored_paths:
             level = (
                 logging.ERROR
@@ -103,15 +162,27 @@ def configure_observability(app):
                     "http_method": request.method,
                     "endpoint": request.path,
                     "status_code": response.status_code,
-                    "response_time_ms": round(duration, 2),
+                    "response_time_ms": round(duration_ms, 2),
                 },
             )
         return response
 
     @app.route("/health", methods=["GET"])
     def health_check():
+        mongo_status = _mongo_status()
+        dependencies = {"mongodb": mongo_status}
+        if os.getenv("REDIS_URL"):
+            try:
+                with redis_client() as client:
+                    client.ping()
+                dependencies["redis"] = {"status": "up"}
+            except Exception:
+                dependencies["redis"] = {"status": "down"}
+        healthy = all(value["status"] == "up" for value in dependencies.values())
+        if HEALTH_STATUS:
+            HEALTH_STATUS.set(1 if healthy else 0)
         return {
-            "status": "healthy",
+            "status": "healthy" if healthy else "degraded",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "service": "candidatures-api",
             "version": os.getenv("APP_VERSION", "1.0.0"),
@@ -121,7 +192,22 @@ def configure_observability(app):
                 "development",
             ),
             "apm_enabled": apm_enabled,
-        }
+            "dependencies": dependencies,
+        }, 200 if healthy else 503
+
+    @app.route("/metrics", methods=["GET"])
+    def metrics():
+        _authorize_metrics()
+        mongo_status = _mongo_status()
+        if HEALTH_STATUS:
+            HEALTH_STATUS.set(1 if mongo_status["status"] == "up" else 0)
+        if generate_latest is None:
+            return Response(
+                "# prometheus_client_missing 1\n",
+                mimetype=CONTENT_TYPE_LATEST,
+                status=503,
+            )
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     return logger
 
@@ -181,3 +267,46 @@ def _client_ip():
     if forwarded:
         return forwarded.split(",", 1)[0].strip()
     return request.headers.get("X-Real-IP") or request.remote_addr
+
+
+def _record_http_metrics(status_code, duration_seconds):
+    if not REQUEST_COUNT or not REQUEST_LATENCY:
+        return
+    endpoint = request.url_rule.rule if request.url_rule else "unmatched"
+    labels = {
+        "method": request.method,
+        "endpoint": endpoint,
+        "status": str(status_code),
+    }
+    REQUEST_COUNT.labels(**labels).inc()
+    REQUEST_LATENCY.labels(**labels).observe(duration_seconds)
+
+
+def _mongo_status():
+    started_at = time.perf_counter()
+    try:
+        get_db().command("ping")
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        if MONGODB_UP:
+            MONGODB_UP.set(1)
+        return {"status": "up", "latency_ms": latency_ms}
+    except Exception as error:
+        if MONGODB_UP:
+            MONGODB_UP.set(0)
+        return {"status": "down", "error": "MongoDB indisponible"}
+
+
+def _authorize_metrics():
+    expected_token = os.getenv("METRICS_TOKEN")
+    if not expected_token:
+        return
+
+    bearer = request.headers.get("Authorization", "")
+    header_token = request.headers.get("X-Metrics-Token", "")
+    provided_token = (
+        bearer.removeprefix("Bearer ").strip()
+        if bearer.startswith("Bearer ")
+        else header_token.strip()
+    )
+    if provided_token != expected_token:
+        abort(401)

@@ -15,6 +15,7 @@ from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
 from app.services.tests.formation_catalog import normalize_formation
+from app.utils.shared_rate_limit import shared_rate_limited
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,9 @@ class SlidingWindowRateLimiter:
         self.lock = threading.Lock()
 
     def is_limited(self, key, now=None):
+        shared = shared_rate_limited(f"test:{key}", self.limit, self.window, now)
+        if shared is not None:
+            return shared
         now = now or time.time()
         with self.lock:
             self._cleanup(now)
@@ -98,6 +102,10 @@ class ExpiringTestCache:
                         "timestamp": now,
                     }
             return test
+
+    def invalidate(self, test_id):
+        with self.lock:
+            self.values.pop(str(test_id), None)
 
     def _read_cached(self, key, now):
         with self.lock:
@@ -187,6 +195,9 @@ class TestAccessService:
         self.cache = cache or ExpiringTestCache()
         self.access_logger = access_logger or AsyncAccessLogger()
 
+    def content_access(self, test_id, email, phone, ip):
+        return self._verify_candidate_access(test_id, email, phone, ip, rate_limit_prefix="content")
+
     def verify(self, test_id, email, phone, ip):
         access = self._verify_candidate_access(
             test_id=test_id,
@@ -236,7 +247,11 @@ class TestAccessService:
                 400,
             ) from error
 
-        test = self.cache.get(test_object_id)
+        # Authorization must use fresh dates even when another API worker
+        # changed the test. Only the public metadata endpoint uses the cache.
+        test = Test.objects(id=test_object_id).only(
+            "id", "title", "referentiel", "scheduledDate", "scheduledTime", "duration", "status",
+        ).first()
         if not test:
             self._deny(test_id, email, ip, "test_not_found")
             raise TestAccessError("Test non trouvé", 404)
@@ -255,16 +270,19 @@ class TestAccessService:
         stored_phone = self.normalize_digits(candidature.phone)
         incoming_phone = self.normalize_digits(phone)
         if (
-            stored_phone != incoming_phone
+            len(incoming_phone) < 9
+            or (stored_phone != incoming_phone
             and not stored_phone.endswith(incoming_phone)
+            )
         ):
             self._deny(test_id, email, ip, "phone_mismatch")
             raise TestAccessError("Numéro incorrect", 403)
 
-        if TestResult.objects(
+        existing_result = TestResult.objects(
             testId=str(test.id),
             candidate__email=email,
-        ).only("id").first() and not allow_existing_result:
+        ).only("id").first()
+        if existing_result and not allow_existing_result:
             self._deny(test_id, email, ip, "already_passed")
             raise TestAccessError("Test déjà passé", 403)
 
@@ -292,10 +310,15 @@ class TestAccessService:
                 403,
             )
 
-        self._validate_time_window(
-            test,
-            late_submission_grace_seconds=late_submission_grace_seconds,
-        )
+        # A confirmed result may be acknowledged again after the window closes;
+        # this never allows a first late attempt or changes the stored answers.
+        if not (existing_result and allow_existing_result):
+            if test.status == "draft":
+                raise TestAccessError("Test non accessible", 403)
+            self._validate_time_window(
+                test,
+                late_submission_grace_seconds=late_submission_grace_seconds,
+            )
         return {
             "candidate": {
                 "id": str(candidature.id),

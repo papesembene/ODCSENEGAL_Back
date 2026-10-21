@@ -31,7 +31,7 @@ def _require_planning_admin():
 
 
 @interview_bp.route("/interviews/bootstrap", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def get_interviews_bootstrap():
     data = query_service.bootstrap(
         request.args.get("formation"),
@@ -41,7 +41,7 @@ def get_interviews_bootstrap():
 
 
 @interview_bp.route("/interviews/capabilities", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def get_interview_capabilities():
     return jsonify(
         {
@@ -54,7 +54,7 @@ def get_interview_capabilities():
 
 
 @interview_bp.route("/interviews/campaigns", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def get_interview_campaigns():
     return jsonify(
         {
@@ -86,7 +86,7 @@ def create_interview_campaign():
     "/interviews/campaigns/<campaign_id>",
     methods=["PATCH"],
 )
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def update_interview_campaign(campaign_id):
     try:
         data = request.get_json(silent=True) or {}
@@ -105,7 +105,7 @@ def update_interview_campaign(campaign_id):
 
 
 @interview_bp.route("/interviews/slots", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def get_interview_slots():
     return jsonify(
         {
@@ -188,7 +188,7 @@ def confirm_interview_availability(token):
 
 
 @interview_bp.route("/interviews/evaluations", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def get_interview_evaluations():
     page = query_service.evaluation_page(
         request.args,
@@ -198,7 +198,7 @@ def get_interview_evaluations():
 
 
 @interview_bp.route("/interviews/evaluations/export", methods=["GET"])
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def export_interview_evaluations():
     csv_content, filename = query_service.export_evaluations_csv(
         request.args,
@@ -233,7 +233,7 @@ def seed_interview_evaluations():
     "/interviews/evaluations/<evaluation_id>",
     methods=["PATCH"],
 )
-@admin_required(ADMIN_TYPES)
+@admin_required(ADMIN_TYPES, allow_interview_members=True)
 def update_interview_evaluation(evaluation_id):
     try:
         evaluation = evaluation_service.update(

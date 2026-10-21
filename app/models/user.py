@@ -1,8 +1,7 @@
-from flask_mongoengine import MongoEngine
+from app.database import db
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.services.file_service import FileService
-db = MongoEngine()
 
 
 

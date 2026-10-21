@@ -3,6 +3,7 @@
 import logging
 import os
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -41,13 +42,17 @@ class BrevoEmailService:
 
     @property
     def is_configured(self):
-        return bool((self.api_key or self.smtp_key) and self.from_email)
+        if self.should_use_smtp:
+            return bool(self.smtp_key and self.smtp_login and self.from_email)
+        return bool(self.api_key and not self.api_key.startswith("xsmtpsib-") and self.from_email)
 
     @property
     def should_use_smtp(self):
         provider = os.getenv("EMAIL_PROVIDER", "").lower()
         if provider == "brevo_smtp":
             return True
+        if provider == "brevo":
+            return False
         return bool((self.smtp_key or "").startswith("xsmtpsib-"))
 
     def send_html(self, recipients, subject, html, reply_to=None):
@@ -96,10 +101,10 @@ class BrevoEmailService:
                 response.status_code,
                 detail,
             )
-            return {"sent": False, "message": f"Email non envoyé: {detail}"}
+            return {"sent": False, "retryable": response.status_code == 429 or response.status_code >= 500, "message": f"Email non envoyé: {detail}"}
         except Exception as error:
             logging.exception("Erreur Brevo: %s", error)
-            return {"sent": False, "message": f"Email non envoyé: {error}"}
+            return {"sent": False, "retryable": True, "message": "Service Brevo temporairement indisponible"}
 
     def _send_smtp(self, recipients, subject, html, reply_to=None):
         if not self.smtp_login or not self.smtp_key:
@@ -120,15 +125,18 @@ class BrevoEmailService:
                     message["Reply-To"] = reply_to
                 message.attach(MIMEText(html, "html", "utf-8"))
 
-                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
                     server.ehlo()
-                    server.starttls()
+                    server.starttls(context=ssl.create_default_context())
                     server.login(self.smtp_login, self.smtp_key)
                     server.send_message(message)
             return {"sent": True, "message": "Email envoyé"}
-        except Exception as error:
-            logging.exception("Erreur SMTP Brevo: %s", error)
-            return {"sent": False, "message": f"Email non envoyé: {error}"}
+        except smtplib.SMTPResponseException as error:
+            return {"sent": False, "retryable": 400 <= error.smtp_code < 500,
+                    "message": f"Email refuse par SMTP Brevo (code {error.smtp_code})"}
+        except Exception:
+            logging.warning("Transport SMTP Brevo indisponible")
+            return {"sent": False, "retryable": True, "message": "Service SMTP Brevo temporairement indisponible"}
 
     @staticmethod
     def _normalize_recipients(recipients):

@@ -1,6 +1,7 @@
 """Test group planning, assignment and invitation use cases."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+import os
 
 from mongoengine.errors import ValidationError
 
@@ -128,6 +129,12 @@ class TestGroupService:
     def update_group(self, group_id, data):
         group = self.get_group(group_id)
         data = data or {}
+        changed_date = "test_date" in data and self._parse_date(data["test_date"]) != group.test_date
+        if changed_date or any(field in data and data[field] != getattr(group, field, None) for field in ("test_id", "duration")):
+            group.invitation_batch_key = None
+            group.email_sent = None
+            if group.status == "scheduled":
+                group.status = "pending"
         if "candidate_ids" in data:
             data["candidate_ids"] = self._unique_candidate_ids(
                 data["candidate_ids"],
@@ -169,6 +176,21 @@ class TestGroupService:
             if group.test_id
             else None
         )
+        if os.getenv("EMAIL_DELIVERY_MODE", "sync") == "queued":
+            from app.services.invitation_queue import InvitationQueue
+
+            queue = InvitationQueue()
+            if not test or not queue.transport.is_configured:
+                raise TestGroupServiceError("Test ou service email non configure", 400)
+            try:
+                summary = queue.enqueue(group, test, frontend_url)
+            except ValueError as error:
+                raise TestGroupServiceError(str(error)) from error
+            return {"status_code": 202, "payload": {
+                "success": True, "queued": True,
+                "message": "Invitations prises en charge. Consultez le suivi des envois.",
+                "data": summary,
+            }}
         candidates = list(
             Candidature.objects(id__in=group.candidate_ids),
         )
@@ -177,7 +199,7 @@ class TestGroupService:
                 "Aucun candidat trouvé dans ce groupe"
             )
         email_service = TestEmailService()
-        if simulate and not email_service.sendgrid_api_key:
+        if simulate and not email_service.is_configured:
             self._mark_scheduled(group)
             return {
                 "status_code": 200,
@@ -258,7 +280,8 @@ class TestGroupService:
     @staticmethod
     def _parse_date(value):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
         except (AttributeError, ValueError) as error:
             raise TestGroupServiceError(
                 "Format de date invalide"

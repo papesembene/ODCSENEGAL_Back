@@ -2,6 +2,8 @@
 from dotenv import load_dotenv
 import os
 from datetime import timedelta
+from app.runtime_config import env_int
+from urllib.parse import urlsplit
 
 load_dotenv()
 
@@ -25,13 +27,14 @@ class Config:
         "db": os.getenv('MONGO_DBNAME', 'odcdb'),
         "host": os.getenv('MONGO_URI', 'mongodb://localhost:27017/odcdb'), 
         "connect": False,  # Important pour éviter les problèmes de fork
-        # Configuration du pool optimisée pour serveur dédié (15 Go RAM)
-        "maxPoolSize": 300,  # Augmenté car serveur dédié avec ressources suffisantes
-        "minPoolSize": 30,   # Plus de connexions maintenues pour performance
+        # Budget per process: multiply by API replicas and background workers.
+        "maxPoolSize": env_int("MONGO_MAX_POOL_SIZE", 50, maximum=1000),
+        "minPoolSize": env_int("MONGO_MIN_POOL_SIZE", 0, minimum=0, maximum=1000),
         "maxIdleTimeMS": 45000,  # Temps max avant fermeture connexion inactive
-        "serverSelectionTimeoutMS": 10000,  # Timeout pour sélection serveur
-        "socketTimeoutMS": 30000,  # Timeout pour opérations socket
-        "connectTimeoutMS": 10000,  # Timeout pour connexion initiale
+        "serverSelectionTimeoutMS": env_int("MONGO_SELECTION_TIMEOUT_MS", 5000),
+        "socketTimeoutMS": env_int("MONGO_SOCKET_TIMEOUT_MS", 30000),
+        "connectTimeoutMS": env_int("MONGO_CONNECT_TIMEOUT_MS", 5000),
+        "waitQueueTimeoutMS": env_int("MONGO_WAIT_QUEUE_TIMEOUT_MS", 5000),
         "retryWrites": True,  # Réessayer les écritures en cas d'échec
         "w": "majority",  # Attendre confirmation majorité pour écritures
         # Options supplémentaires pour performance sur serveur dédié
@@ -67,7 +70,7 @@ class Config:
         ).split(",")
         if origin.strip()
     ]
-    SESSION_TYPE = 'filesystem'
+    SESSION_TYPE = os.getenv("SESSION_TYPE", "filesystem")
 
     # Configuration Mail
     MAIL_SERVER = os.getenv('MAIL_SERVER')
@@ -107,18 +110,20 @@ class Config:
     S3_REGION = None
 
 
-    # Configuration Mail
-    MAIL_SERVER = os.getenv('MAIL_SERVER')
-    MAIL_PORT = int(os.getenv('MAIL_PORT', 587))
-    MAIL_USE_TLS = os.getenv('MAIL_USE_TLS', 'true').lower() == 'true'
-    MAIL_USE_SSL = os.getenv('MAIL_USE_SSL', 'false').lower() == 'true'
-    MAIL_USERNAME = os.getenv('MAIL_USERNAME')
-    MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
-    MAIL_DEFAULT_SENDER = os.getenv('MAIL_DEFAULT_SENDER')
-    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
-
     @classmethod
     def validate(cls):
+        if cls.MONGODB_SETTINGS["minPoolSize"] > cls.MONGODB_SETTINGS["maxPoolSize"]:
+            raise RuntimeError("MONGO_MIN_POOL_SIZE depasse MONGO_MAX_POOL_SIZE")
+        if cls.SESSION_TYPE == "redis" and not os.getenv("REDIS_URL"):
+            raise RuntimeError("REDIS_URL requis pour les sessions partagees")
+        if cls.SESSION_TYPE not in {"redis", "filesystem"}:
+            raise RuntimeError("SESSION_TYPE invalide")
+        if os.getenv("EMAIL_PROVIDER", "auto") not in {"auto", "brevo", "brevo_smtp", "sendgrid", "smtp"}:
+            raise RuntimeError("EMAIL_PROVIDER invalide")
+        if os.getenv("EMAIL_DELIVERY_MODE", "sync") not in {"sync", "queued"}:
+            raise RuntimeError("EMAIL_DELIVERY_MODE invalide")
+        if cls.MAIL_USE_TLS and cls.MAIL_USE_SSL:
+            raise RuntimeError("MAIL_USE_TLS et MAIL_USE_SSL sont incompatibles")
         if cls.ENVIRONMENT != "production":
             return
         weak_values = {"", "dev_key", "jwt_dev_key"}
@@ -129,6 +134,22 @@ class Config:
             missing.append("JWT_SECRET_KEY")
         if not os.getenv("MONGO_URI"):
             missing.append("MONGO_URI")
+        if not os.getenv("MONGO_DBNAME"):
+            missing.append("MONGO_DBNAME")
+        if len(cls.SECRET_KEY) < 32 or len(cls.JWT_SECRET_KEY) < 32:
+            missing.append("cles SECRET_KEY/JWT_SECRET_KEY d'au moins 32 caracteres")
+        if os.getenv("RUN_PREPROD_SEED", "false").lower() == "true":
+            missing.append("RUN_PREPROD_SEED doit rester false en production")
+        if urlsplit(cls.FRONTEND_URL).scheme != "https" or not os.getenv("CORS_ALLOWED_ORIGINS"):
+            missing.append("FRONTEND_URL HTTPS et CORS_ALLOWED_ORIGINS explicites")
+        if any(urlsplit(origin).scheme != "https" or not urlsplit(origin).hostname or "*" in origin
+               for origin in cls.CORS_ALLOWED_ORIGINS):
+            missing.append("CORS: utiliser uniquement des origines HTTPS precises")
+        database_in_uri = urlsplit(cls.MONGODB_SETTINGS["host"]).path.strip("/")
+        if database_in_uri and database_in_uri != cls.MONGODB_SETTINGS["db"]:
+            missing.append("MONGO_URI et MONGO_DBNAME ne ciblent pas la meme base")
+        if env_int("APP_INSTANCES", 1, maximum=100) > 1 and cls.SESSION_TYPE != "redis":
+            missing.append("SESSION_TYPE=redis requis pour plusieurs instances")
         if missing:
             raise RuntimeError(
                 "Configuration de production invalide: "

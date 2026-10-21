@@ -49,6 +49,11 @@ tmp/
 .env.production.local
  
 credentials.json
+.env.production
+*.pem
+*.key
+*.p12
+*.pfx
  
 # -------------------------------------------------------------------
  

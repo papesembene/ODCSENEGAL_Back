@@ -18,7 +18,7 @@ def _extract_bearer_token():
     return token
 
 
-def admin_required(admin_types=None):
+def admin_required(admin_types=None, *, allow_interview_members=False):
     allowed_types = set(admin_types or [])
 
     def decorator(view_func):
@@ -36,6 +36,13 @@ def admin_required(admin_types=None):
 
                 if allowed_types and getattr(user, "admin_type", None) not in allowed_types:
                     raise Unauthorized("Type d'administrateur non autorisé")
+
+                if (
+                    not allow_interview_members
+                    and getattr(user, "admin_type", None) != "super_admin"
+                    and (getattr(user, "profile_data", None) or {}).get("admin_scope") == "interview_member"
+                ):
+                    return jsonify({"success": False, "error": "Acces reserve aux administrateurs de la plateforme"}), 403
 
                 g.current_admin = user
                 return view_func(*args, **kwargs)

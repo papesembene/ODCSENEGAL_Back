@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, Response, abort, g, request, jsonify, stream_with_context
 import logging
 from app.utils.auth_decorators import admin_required
 from app.services.tests.test_management_service import (
@@ -100,6 +100,7 @@ def mark_test_session_for_reschedule(session_id):
         }), 500
  
 @test_bp.route('/tests/<test_id>', methods=['GET'])
+@admin_required({'competences', 'super_admin'})
 def get_test(test_id):
     """Récupérer un test spécifique par son ID"""
     try:
@@ -115,6 +116,34 @@ def get_test(test_id):
             'success': False,
             'error': f"Erreur lors de la récupération du test : {str(e)}"
         }), 500
+
+
+@test_bp.route('/tests/<test_id>/content', methods=['POST'])
+def get_candidate_test_content(test_id):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return build_candidate_error("Donnees invalides", 400)
+    try:
+        test_access_service.content_access(
+            test_id, payload.get("email"), payload.get("phone"), request.remote_addr or "unknown",
+        )
+        test = test_management_service.get_test(test_id)
+        content = {field: getattr(test, field) for field in (
+            "title", "referentiel", "duration", "scheduledDate", "scheduledTime",
+            "totalQuestions", "passingScore", "description", "status",
+        )}
+        content["id"] = str(test.id)
+        content["questions"] = [{
+            "question": question.question, "type": question.type,
+            "options": question.options, "score": question.score, "image": question.image,
+        } for question in test.questions]
+        response = jsonify({"success": True, "data": content})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except TestAccessError as error:
+        return build_candidate_error(str(error), error.status_code)
+    except TestServiceError as error:
+        return test_service_error_response(error)
  
 @test_bp.route('/tests', methods=['POST'])
 @admin_required({'competences', 'super_admin'})
@@ -146,6 +175,7 @@ def update_test(test_id):
             test_id,
             request.get_json() or {},
         )
+        test_access_service.cache.invalidate(test_id)
         return jsonify({
             'success': True,
             'message': 'Test mis à jour avec succès',
@@ -165,6 +195,7 @@ def delete_test(test_id):
     """Supprimer un test"""
     try:
         test_management_service.delete_test(test_id)
+        test_access_service.cache.invalidate(test_id)
         return jsonify({
             'success': True,
             'message': 'Test supprimé avec succès'
@@ -182,22 +213,32 @@ def delete_test(test_id):
 @test_bp.route('/tests/results', methods=['GET'])
 @admin_required({'competences', 'super_admin'})
 def get_all_results():
-    """Récupérer tous les résultats des tests"""
+    """Return a bounded page; candidate answers are loaded separately."""
+    from app.services.tests.test_result_queries import TestResultQueries
     try:
-        return jsonify({
-            'success': True,
-            'data': test_management_service.list_results({
-                'testId': request.args.get('testId'),
-                'referentiel': request.args.get('referentiel'),
-                'status': request.args.get('status'),
-            }),
-        }), 200
-       
+        response = jsonify(success=True, **TestResultQueries.page(request.args))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except ValueError as error:
+        return jsonify(success=False, error=str(error)), 400
     except Exception as e:
         return jsonify({
             'success': False,
             'error': f"Erreur lors de la récupération des résultats : {str(e)}"
         }), 500
+
+
+@test_bp.route('/tests/results/export', methods=['GET'])
+@admin_required({'competences', 'super_admin'})
+def export_results():
+    from app.services.tests.test_result_queries import TestResultQueries
+    try:
+        stream = TestResultQueries.export(request.args)
+        return Response(stream_with_context(stream), content_type='text/csv; charset=utf-8', headers={
+            'Content-Disposition': 'attachment; filename="resultats-tests.csv"', 'Cache-Control': 'no-store',
+        })
+    except ValueError as error:
+        return jsonify(success=False, error=str(error)), 400
  
 @test_bp.route('/tests/results/<result_id>', methods=['GET'])
 @admin_required({'competences', 'super_admin'})
@@ -217,6 +258,20 @@ def get_result(result_id):
             'error': f"Erreur lors de la récupération du résultat : {str(e)}"
         }), 500
  
+@test_bp.route('/tests/results/import', methods=['POST'])
+@admin_required({'competences', 'super_admin'})
+def import_test_result():
+    if (getattr(g.current_admin, "profile_data", None) or {}).get("admin_scope") == "interview_member":
+        abort(403)
+    payload = request.get_json(silent=True) or {}
+    try:
+        result, created = test_management_service.submit_result(payload, trusted_import=True)
+        test_session_service.mark_submitted(payload["testId"], payload["candidate"]["email"], payload["candidate"])
+        return jsonify({"success": True, "idempotent": not created, "data": result.to_dict()}), 201 if created else 200
+    except TestServiceError as error:
+        return test_service_error_response(error)
+
+
 @test_bp.route('/tests/results', methods=['POST'])
 def submit_result():
     """Soumettre un résultat de test - Optimisé pour 42k candidats avec pics de 10k soumissions"""
@@ -233,6 +288,17 @@ def submit_result():
         test_session_service.mark_submitted(
             payload.get("testId"),
             (candidate.get("email") or "").strip().lower(),
+            candidate,
+        )
+        logger.info(
+            "Résultat test candidat confirmé",
+            extra={
+                "test_id": payload.get("testId"),
+                "candidate_email": (candidate.get("email") or "").strip().lower(),
+                "candidate_phone": (candidate.get("phone") or "").strip(),
+                "test_session_status": "submitted",
+                "idempotent": not created,
+            },
         )
         return jsonify({
             'success': True,
@@ -306,6 +372,15 @@ def save_test_session_draft(test_id):
             request.remote_addr or "unknown",
         )
         draft = test_session_service.save_draft(test_id, data, access)
+        logger.info(
+            "Brouillon test candidat sauvegardé",
+            extra={
+                "test_id": test_id,
+                "candidate_email": (data.get("email") or "").strip().lower(),
+                "candidate_phone": (data.get("phone") or "").strip(),
+                "test_session_status": "in_progress",
+            },
+        )
         return jsonify({
             "success": True,
             "message": "Brouillon sauvegardé",
@@ -389,47 +464,36 @@ def get_performance_stats():
             'error': f"Erreur lors de la récupération des statistiques : {str(e)}"
         }), 500
  
-# ==================== ENVOI D'EMAILS (simulation) ====================
+# ==================== NOTIFICATIONS DE RESULTATS ====================
  
 @test_bp.route('/tests/send-emails', methods=['POST'])
 @admin_required({'competences', 'super_admin'})
 def send_emails():
-    """Envoyer des emails aux candidats (simulation)"""
+    """Queue real notifications without blocking the API on email delivery."""
+    from app.services.result_notification_service import ResultNotificationService
     try:
-        data = request.get_json()
-       
-        email_type = data.get('emailType')
-        recipients = data.get('recipients', [])
-        test_details = data.get('testDetails')
-        time_slot = data.get('timeSlot', '')
-        custom_message = data.get('customMessage', '')
-       
-        # Simulation d'envoi d'emails
-        # En production, utiliser un service d'email comme SendGrid, Mailgun, etc.
-       
-        email_type_labels = {
-            'invitation': "d'invitation",
-            'reminder': "de rappel",
-            'results_selected': "de résultats (sélectionné)",
-            'results_not_selected': "de résultats (non sélectionné)",
-            'documents_reminder': "de rappel documents",
-            'opening_announcement': "d'annonce de rentrée"
-        }
-       
-        message = f"Email {email_type_labels.get(email_type, '')} envoyé à {len(recipients)} candidat(s)"
-        if time_slot:
-            message += f" (Créneau: {time_slot})"
-       
-        return jsonify({
-            'success': True,
-            'message': message
-        }), 200
-       
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f"Erreur lors de l'envoi des emails : {str(e)}"
-        }), 500
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValueError("Corps JSON invalide")
+        summary = ResultNotificationService().enqueue(data)
+        return jsonify(success=True, queued=True, data=summary, message="Emails places en file d'attente"), 202
+    except ValueError as error:
+        return jsonify(success=False, error=str(error)), 400
+
+
+@test_bp.route('/tests/notifications/<batch_id>/status', methods=['GET'])
+@test_bp.route('/tests/notifications/<batch_id>/retry', methods=['POST'])
+@admin_required({'competences', 'super_admin'})
+def result_notification_status(batch_id):
+    from app.services.result_notification_service import ResultNotificationService
+    try:
+        service = ResultNotificationService()
+        summary = service.retry_failed(batch_id) if request.method == 'POST' else service.summary(batch_id)
+        if not summary['total']:
+            return jsonify(success=False, error="Envoi introuvable"), 404
+        return jsonify(success=True, data=summary)
+    except ValueError as error:
+        return jsonify(success=False, error=str(error)), 400
  
 # ==================== VÉRIFICATION D'ACCÈS ET LOGS ====================
  

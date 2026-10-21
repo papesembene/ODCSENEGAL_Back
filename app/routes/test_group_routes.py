@@ -1,4 +1,4 @@
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, abort, current_app, g, jsonify, request
 
 from app.services.tests.test_group_service import (
     TestGroupService,
@@ -167,7 +167,7 @@ def send_test_invitations(group_id):
                 "FRONTEND_URL",
                 "http://localhost:3000",
             ),
-            simulate=request.host.startswith(
+            simulate=current_app.config.get("ENVIRONMENT") != "production" and request.host.startswith(
                 ("localhost", "127.0.0.1", "192.168."),
             ),
         )
@@ -185,6 +185,37 @@ def send_test_invitations(group_id):
                 f"{error}"
             ),
         }), 500
+
+
+@test_group_bp.route("/test-groups/<group_id>/invitations/status", methods=["GET"])
+@admin_required({"competences", "super_admin"})
+def invitation_status(group_id):
+    from app.services.invitation_queue import InvitationQueue
+
+    if (getattr(g.current_admin, "profile_data", None) or {}).get("admin_scope") == "interview_member":
+        abort(403)
+    try:
+        group = test_group_service.get_group(group_id)
+        return jsonify({"success": True, "data": InvitationQueue.summary(group)})
+    except TestGroupServiceError as error:
+        return group_error_response(error)
+
+
+@test_group_bp.route("/test-groups/<group_id>/invitations/retry", methods=["POST"])
+@admin_required({"competences", "super_admin"})
+def retry_failed_invitations(group_id):
+    from app.services.invitation_queue import InvitationQueue
+
+    if (getattr(g.current_admin, "profile_data", None) or {}).get("admin_scope") == "interview_member":
+        abort(403)
+    try:
+        group = test_group_service.get_group(group_id)
+        summary = InvitationQueue().retry_failed(group)
+        return jsonify({"success": True, "data": summary}), 202
+    except ValueError as error:
+        return jsonify({"success": False, "error": str(error)}), 400
+    except TestGroupServiceError as error:
+        return group_error_response(error)
 
 
 @test_group_bp.route("/test-groups/statistics", methods=["GET"])

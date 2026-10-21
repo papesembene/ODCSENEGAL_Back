@@ -29,7 +29,7 @@ logger = configure_observability(app)
 def run_server():
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "5000"))
-    threads = int(os.getenv("WAITRESS_THREADS", "150"))
+    threads = int(os.getenv("WAITRESS_THREADS", "8"))
     timeout = int(os.getenv("WAITRESS_CHANNEL_TIMEOUT", "120"))
     connection_limit = int(
         os.getenv("WAITRESS_CONNECTION_LIMIT", "1000")

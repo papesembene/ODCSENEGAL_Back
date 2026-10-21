@@ -1,6 +1,8 @@
 """Candidate online-test session drafts."""
 
 from datetime import datetime, timedelta
+from bson import ObjectId
+import re
 
 from mongoengine.errors import NotUniqueError, ValidationError
 
@@ -37,46 +39,51 @@ class TestSessionService:
         if not test_id or not candidate_email or not candidate_phone:
             raise TestSessionServiceError("Test, email et téléphone requis", 400)
 
-        session = self.get_draft(test_id, candidate_email) or TestSession(
-            testId=str(test_id),
-            candidateEmail=candidate_email,
-            startedAt=datetime.utcnow(),
-        )
-
-        session.candidatePhone = candidate_phone
-        session.candidateName = (data.get("name") or "").strip()
-        session.answers = data.get("answers") or {}
-        session.lastQuestion = self._safe_int(data.get("lastQuestion"), 0)
-        session.remainingTime = self._safe_int(data.get("remainingTime"), 0)
-        session.status = "in_progress"
-        session.lastSeenAt = datetime.utcnow()
-
+        identity = {"testId": str(test_id), "candidateEmail": candidate_email}
+        now = datetime.utcnow()
         try:
-            session.save()
+            # Create by identity only: terminal sessions must never match an upsert
+            # predicate that would attempt to insert a second document.
+            TestSession.objects(**identity).modify(
+                upsert=True, new=True,
+                set_on_insert__candidatePhone=candidate_phone,
+                set_on_insert__startedAt=now,
+                set_on_insert__status="in_progress",
+            )
         except NotUniqueError:
-            session = self.get_draft(test_id, candidate_email)
-            if not session:
-                raise
-            return self.save_draft(test_id, data, access)
+            pass
+        try:
+            session = TestSession.objects(**identity, status="in_progress").modify(
+                new=True,
+                set__candidatePhone=candidate_phone,
+                set__candidateName=(data.get("name") or "").strip(),
+                set__answers=data.get("answers") or {},
+                set__lastQuestion=self._safe_int(data.get("lastQuestion"), 0),
+                set__remainingTime=self._safe_int(data.get("remainingTime"), 0),
+                set__lastSeenAt=now,
+            )
         except ValidationError as error:
             raise TestSessionServiceError(f"Brouillon invalide : {error}", 400) from error
-
-        return session
+        return session or self.get_draft(test_id, candidate_email)
 
     @staticmethod
-    def mark_submitted(test_id, candidate_email):
-        session = TestSession.objects(
+    def mark_submitted(test_id, candidate_email, candidate=None):
+        candidate = candidate or {}
+        now = datetime.utcnow()
+        query = TestSession.objects(
             testId=str(test_id),
             candidateEmail=(candidate_email or "").strip().lower(),
-        ).first()
-        if not session:
-            return None
-
-        session.status = "submitted"
-        session.submittedAt = datetime.utcnow()
-        session.lastSeenAt = datetime.utcnow()
-        session.save()
-        return session
+        )
+        changes = {"set__status": "submitted", "set__submittedAt": now, "set__lastSeenAt": now}
+        try:
+            return query.modify(
+                upsert=True, new=True, **changes,
+                set_on_insert__candidatePhone=candidate.get("phone") or "",
+                set_on_insert__candidateName=candidate.get("name") or "",
+                set_on_insert__startedAt=now,
+            )
+        except NotUniqueError:
+            return query.modify(new=True, **changes)
 
     def list_admin_sessions(self, filters=None):
         filters = filters or {}
@@ -114,19 +121,13 @@ class TestSessionService:
         if test_id and test_id != "all":
             filters["testId"] = test_id
 
-        sessions = list(
-            TestSession.objects(**filters).only(
-                "id",
-                "testId",
-                "candidateEmail",
-                "candidatePhone",
-                "status",
-            )
-        )
-        tests_by_id = self._get_tests_by_id(sessions)
-
-        for session in sessions:
-            self._sync_session_status(session, tests_by_id.get(session.testId))
+        test_ids = TestSession.objects(**filters).distinct("testId")
+        valid_ids = [value for value in test_ids if ObjectId.is_valid(value)]
+        for test in Test.objects(id__in=valid_ids).only("id", "scheduledDate", "scheduledTime", "duration"):
+            if self._is_expired(None, test):
+                TestSession.objects(testId=str(test.id), status="in_progress").update(
+                    set__status="expired",
+                )
 
     def mark_for_reschedule(self, session_id):
         session = TestSession.objects(id=session_id).first()
@@ -139,10 +140,12 @@ class TestSessionService:
                 409,
             )
 
-        session.status = "to_reschedule"
-        session.remainingTime = 0
-        session.lastSeenAt = datetime.utcnow()
-        session.save()
+        session = TestSession.objects(id=session.id, status__ne="submitted").modify(
+            new=True, set__status="to_reschedule", set__remainingTime=0,
+            set__lastSeenAt=datetime.utcnow(),
+        )
+        if not session:
+            raise TestSessionServiceError("Un test deja soumis ne peut pas etre reprogramme", 409)
         self._release_candidate_from_test_group(session)
         return session
 
@@ -169,6 +172,7 @@ class TestSessionService:
         search = (filters.get("search") or "").strip()
         query = TestSession.objects(**query_filters)
         if search:
+            search = re.escape(search[:150])
             query = query.filter(
                 __raw__={
                     "$or": [
@@ -183,7 +187,7 @@ class TestSessionService:
 
     @staticmethod
     def _get_tests_by_id(sessions):
-        test_ids = list({session.testId for session in sessions if session.testId})
+        test_ids = list({session.testId for session in sessions if ObjectId.is_valid(session.testId)})
         if not test_ids:
             return {}
 
@@ -198,14 +202,14 @@ class TestSessionService:
             candidate__email=session.candidateEmail,
         ).only("id").first()
         if result_exists:
-            session.status = "submitted"
-            session.submittedAt = session.submittedAt or datetime.utcnow()
-            session.save()
-            return session
+            return self.mark_submitted(session.testId, session.candidateEmail, {
+                "phone": session.candidatePhone, "name": session.candidateName,
+            })
 
         if self._is_expired(session, test):
-            session.status = "expired"
-            session.save()
+            return TestSession.objects(id=session.id, status="in_progress").modify(
+                new=True, set__status="expired",
+            ) or TestSession.objects(id=session.id).first()
 
         return session
 
@@ -262,9 +266,6 @@ class TestSessionService:
         if candidate_id not in (group.candidate_ids or []):
             return
 
-        group.candidate_ids = [
-            item for item in (group.candidate_ids or [])
-            if item != candidate_id
-        ]
-        group.updated_at = datetime.utcnow()
-        group.save()
+        TestGroup.objects(id=group.id).update_one(
+            pull__candidate_ids=candidate_id, set__updated_at=datetime.utcnow(),
+        )

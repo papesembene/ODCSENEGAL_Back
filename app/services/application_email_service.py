@@ -4,9 +4,9 @@ from html import escape
 import logging
 
 from flask import current_app
-from flask_mail import Mail, Message
+from flask_mail import Mail
 
-from app.services.brevo_email_service import BrevoEmailService
+from app.services.email_transport import EmailTransport
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class ApplicationEmailService:
 
     def __init__(self, app=None):
         self.mail = None
-        self.brevo = BrevoEmailService()
+        self.delivery = EmailTransport()
         if app is not None:
             self.init_app(app)
 
@@ -55,54 +55,10 @@ class ApplicationEmailService:
         )
 
     def _send(self, subject, recipients, html, reply_to=None):
-        if not self.mail:
-            if self.brevo.is_configured:
-                return self.brevo.send_html(
-                    recipients=recipients,
-                    subject=subject,
-                    html=html,
-                    reply_to=reply_to,
-                )["sent"]
-            logger.warning(
-                "Email %s ignoré: service mail non initialisé",
-                self.program_name,
-            )
-            return False
-        if self.brevo.is_configured:
-            return self.brevo.send_html(
-                recipients=recipients,
-                subject=subject,
-                html=html,
-                reply_to=reply_to,
-            )["sent"]
-        sender = current_app.config.get("MAIL_DEFAULT_SENDER")
-        if not sender:
-            logger.warning(
-                "Email %s ignoré: MAIL_DEFAULT_SENDER absent",
-                self.program_name,
-            )
-            return False
-        try:
-            message = Message(
-                subject=subject,
-                recipients=recipients,
-                html=html,
-                sender=sender,
-                reply_to=reply_to,
-            )
-            message.extra_headers = {
-                "Auto-Submitted": "auto-generated",
-                "X-Auto-Response-Suppress": "All",
-                "Precedence": "bulk",
-            }
-            self.mail.send(message)
-            return True
-        except Exception:
-            logger.exception(
-                "Échec d'envoi email %s",
-                self.program_name,
-            )
-            return False
+        result = self.delivery.send_html(recipients, subject, html, reply_to)
+        if not result["sent"]:
+            logger.warning("Email %s non envoye: %s", self.program_name, result["message"])
+        return result["sent"]
 
     def _confirmation_html(self, data):
         values = self._values(data)

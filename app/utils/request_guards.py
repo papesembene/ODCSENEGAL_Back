@@ -2,6 +2,7 @@ import re
 import time
 from collections import defaultdict
 from threading import Lock
+from app.utils.shared_rate_limit import shared_rate_limited
 
 
 RATE_LIMIT_STORE = defaultdict(list)
@@ -18,6 +19,9 @@ def normalize_phone(value):
 
 
 def is_request_rate_limited(scope, identifier, limit=10, window=60):
+    shared = shared_rate_limited(f"request:{scope}:{identifier or 'anonymous'}", limit, window)
+    if shared is not None:
+        return shared
     with RATE_LIMIT_LOCK:
         now = time.time()
         key = f"{scope}:{identifier or 'anonymous'}"

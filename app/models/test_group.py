@@ -22,6 +22,7 @@ class TestGroup(Document):
     # Statut
     status = StringField(default='pending', choices=['pending', 'scheduled', 'completed', 'cancelled'])
     email_sent = DateTimeField()  # Date d'envoi de l'email d'invitation
+    invitation_batch_key = StringField()
     
     # Métadonnées
     created_by = StringField()  # Email de l'admin qui a créé le groupe
@@ -59,6 +60,7 @@ class TestGroup(Document):
             'instructions': self.instructions,
             'status': self.status,
             'email_sent': self.email_sent.isoformat() if self.email_sent else None,
+            'invitation_batch_key': self.invitation_batch_key,
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

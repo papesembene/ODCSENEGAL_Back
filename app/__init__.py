@@ -3,7 +3,7 @@
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from flask_mongoengine import MongoEngine
+from app.database import db
 from flask_mail import Mail
 from flask_session import Session
 from app.services.email_service import EmailService
@@ -14,7 +14,6 @@ from app.utils.error_handlers import register_error_handlers
 from app.config import Config
  
 # Initialisation des extensions
-db = MongoEngine()
 jwt = JWTManager()
 mail = Mail()
 email_service = EmailService()
@@ -45,7 +44,10 @@ def create_app(config_class=Config):
     app.json = CustomJSONProvider(app)
  
     # Configuration des sessions
-    app.config['SESSION_TYPE'] = 'filesystem'
+    if app.config.get("SESSION_TYPE") == "redis":
+        from app.runtime_config import redis_client
+
+        app.config["SESSION_REDIS"] = redis_client()
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['SESSION_COOKIE_SECURE'] = (
         app.config.get("ENVIRONMENT") == "production"

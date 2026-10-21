@@ -1,5 +1,9 @@
 .git
 .venv
+.venv*
+venv
+env
+.github
 __pycache__
 *.pyc
 .pytest_cache
@@ -7,6 +11,13 @@ __pycache__
 .ruff_cache
 .env
 .env.*
+*.pem
+*.key
+*.p12
+*.pfx
+ops
+load_tests
+tests
 logs
 flask_session
 node_modules

@@ -1,5 +1,9 @@
 """Anti-cheat violation use cases."""
 
+from datetime import datetime
+import re
+from pymongo.errors import DuplicateKeyError
+
 from app.models.test_violation import TestViolation
 from app.services.tests.test_access_service import SlidingWindowRateLimiter
 
@@ -27,6 +31,13 @@ class TestViolationService:
             raise TestViolationServiceError(
                 "Email, type et message sont requis"
             )
+        if not isinstance(violation_type, str) or not re.fullmatch(r"[a-z_]{1,64}", violation_type):
+            raise TestViolationServiceError("Type d'evenement invalide")
+        if not isinstance(message, str) or len(message) > 1000:
+            raise TestViolationServiceError("Message d'evenement invalide")
+        elapsed = data.get("elapsedTime")
+        if elapsed is not None and (type(elapsed) is not int or elapsed < 0):
+            raise TestViolationServiceError("Temps ecoule invalide")
         if TestViolationService.rate_limiter.is_limited(
             f"{test_id}:{candidate_email}",
         ):
@@ -34,27 +45,22 @@ class TestViolationService:
                 "Trop d'événements anti-triche reçus, réessayez dans un instant",
                 429,
             )
-        violation = TestViolation.objects(
-            testId=str(test_id),
-            candidateEmail=candidate_email,
-        ).first()
-        if not violation:
-            violation = TestViolation(
-                testId=str(test_id),
-                testResultId=data.get("testResultId"),
-                candidateEmail=candidate_email,
-                metadata=data.get("metadata", {}),
-            )
-        violation.testResultId = (
-            data.get("testResultId") or violation.testResultId
-        )
-        violation.add_violation(
-            violation_type,
-            message,
-            data.get("elapsedTime"),
-        )
-        violation.save()
-        return violation
+        now = datetime.utcnow()
+        query = {"testId": str(test_id), "candidateEmail": candidate_email}
+        update = {
+            "$setOnInsert": {"createdAt": now, "firstViolationAt": now},
+            "$set": {"updatedAt": now, "lastViolationAt": now},
+            "$inc": {"totalViolations": 1, f"stats.{violation_type}": 1},
+            "$push": {"violations": {"violationType": violation_type, "message": message,
+                                     "timestamp": now, "elapsedTime": elapsed}},
+        }
+        collection = TestViolation._get_collection()
+        try:
+            collection.update_one(query, update, upsert=True)
+        except DuplicateKeyError:
+            # Two first events may race to create the unique candidate record.
+            collection.update_one(query, update, upsert=False)
+        return TestViolation.objects(__raw__=query).get()
 
     @staticmethod
     def list_for_test(test_id):

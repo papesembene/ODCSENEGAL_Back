@@ -38,6 +38,8 @@ class DatabaseIndexesTest(unittest.TestCase):
         self.assertIn(("testId", "candidate.email"), result_indexes)
         self.assertIn(("testId", "status", "completedAt"), result_indexes)
         self.assertIn(("referentiel", "status", "completedAt"), result_indexes)
+        self.assertIn(("completedAt", "_id"), result_indexes)
+        self.assertIn(("referentiel", "status", "completedAt", "_id"), result_indexes)
         self.assertIn(("testId", "candidateEmail"), violation_indexes)
         self.assertIn(("testId", "updatedAt"), violation_indexes)
         self.assertIn(("testId", "totalViolations"), violation_indexes)
