@@ -10,6 +10,7 @@ from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.services.test_email_service import TestEmailService
 from app.services.tests.formation_catalog import FORMATIONS, formation_aliases
+from app.repositories.candidature_filters import candidate_filter
 
 
 class TestGroupServiceError(Exception):
@@ -62,25 +63,18 @@ class TestGroupService:
         if not formation:
             raise TestGroupServiceError("Le référentiel est requis")
 
-        aliases = formation_aliases(formation)
         assigned_ids = TestGroupService._assigned_candidate_ids(formation)
-        query = Candidature.objects(desired_training__in=aliases)
+        try:
+            filters = candidate_filter({"desired_training": formation, "search": search})
+        except ValueError as error:
+            raise TestGroupServiceError(str(error)) from error
+        query = Candidature.objects(__raw__=filters)
         if assigned_ids:
             query = query.filter(id__nin=list(assigned_ids))
-        if search:
-            regex = {"$regex": search, "$options": "i"}
-            query = query.filter(__raw__={
-                "$or": [
-                    {"first_name": regex},
-                    {"last_name": regex},
-                    {"email": regex},
-                    {"phone": regex},
-                ],
-            })
 
         total = query.count()
         offset = max(page - 1, 0) * per_page
-        candidates = query.order_by("-created_at").skip(offset).limit(per_page)
+        candidates = query.order_by("-created_at", "-id").skip(offset).limit(per_page)
 
         return {
             "data": [candidate.to_dict() for candidate in candidates],
@@ -256,25 +250,14 @@ class TestGroupService:
     @staticmethod
     def _serialize_group(group, compact=False):
         payload = group.to_dict()
+        if compact:
+            return payload
         candidates = (
             Candidature.objects(id__in=group.candidate_ids)
             if group.candidate_ids
             else []
         )
-        payload["candidates"] = [
-            (
-                {
-                    "id": str(candidate.id),
-                    "first_name": candidate.first_name,
-                    "last_name": candidate.last_name,
-                    "email": candidate.email,
-                    "phone": candidate.phone,
-                }
-                if compact
-                else candidate.to_dict()
-            )
-            for candidate in candidates
-        ]
+        payload["candidates"] = [candidate.to_dict() for candidate in candidates]
         return payload
 
     @staticmethod

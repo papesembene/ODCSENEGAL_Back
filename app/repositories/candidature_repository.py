@@ -1,6 +1,7 @@
 """MongoEngine persistence adapter for ODC candidatures."""
 
 from app.models.candidature import Candidature
+from app.repositories.candidature_filters import candidate_filter
 
 
 class CandidatureRepository:
@@ -32,18 +33,8 @@ class CandidatureRepository:
 
     @staticmethod
     def list_filtered(filters, search="", page=None, per_page=None):
-        query = Candidature.objects(**filters)
-        if search:
-            regex = {"$regex": search, "$options": "i"}
-            query = query.filter(__raw__={
-                "$or": [
-                    {"first_name": regex},
-                    {"last_name": regex},
-                    {"email": regex},
-                    {"phone": regex},
-                ],
-            })
-        query = query.order_by("-created_at")
+        query = Candidature.objects(__raw__=candidate_filter({**filters, "search": search}))
+        query = query.order_by("-created_at", "-id")
         if page is not None and per_page is not None:
             offset = max(page - 1, 0) * per_page
             return query.skip(offset).limit(per_page)
@@ -51,18 +42,7 @@ class CandidatureRepository:
 
     @staticmethod
     def count_filtered(filters, search=""):
-        query = Candidature.objects(**filters)
-        if search:
-            regex = {"$regex": search, "$options": "i"}
-            query = query.filter(__raw__={
-                "$or": [
-                    {"first_name": regex},
-                    {"last_name": regex},
-                    {"email": regex},
-                    {"phone": regex},
-                ],
-            })
-        return query.count()
+        return Candidature.objects(__raw__=candidate_filter({**filters, "search": search})).count()
 
     @staticmethod
     def list_by_ids(candidate_ids):

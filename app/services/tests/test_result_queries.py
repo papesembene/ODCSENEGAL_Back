@@ -10,6 +10,7 @@ from app.models.test import Test
 from app.models.test_result import TestResult
 from app.models.test_violation import TestViolation
 from app.services.tests.formation_catalog import formation_aliases
+from app.utils.search import text_search_filter
 
 
 SUMMARY_FIELDS = ("testId", "testTitle", "referentiel", "candidate", "score", "status",
@@ -30,7 +31,10 @@ def result_query(filters):
         if status not in {"admis", "rejeté", "pending"}:
             raise ValueError("Statut de resultat invalide")
         query["status"] = status
-    return TestResult.objects(**query)
+    search = text_search_filter(filters.get("search"), (
+        "candidate.name", "candidate.email", "candidate.phone", "testTitle", "referentiel",
+    ), ("candidate.phone",))
+    return TestResult.objects(**query).filter(__raw__=search)
 
 
 def positive_integer(value, default, maximum=None):

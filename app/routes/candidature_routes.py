@@ -1,7 +1,10 @@
 import json
 import logging
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
+
+from app.repositories.candidature_read_repository import CandidatureReadRepository
+from app.services.candidatures.export_service import export_candidates
 
 from app.services.candidatures.service import (
     CandidatureService,
@@ -121,21 +124,18 @@ def check_unique():
 @admin_required({"competences", "super_admin"})
 def get_all_candidatures():
     try:
-        page = request.args.get("page", type=int)
-        per_page = request.args.get("per_page", type=int)
-        if page is not None and page < 1:
-            page = 1
-        if per_page is not None:
-            per_page = min(max(per_page, 1), 200)
-
+        if "page" in request.args or "per_page" in request.args:
+            result = CandidatureReadRepository().page(request.args)
+            return jsonify({"success": True, **result}), 200
+        # Preserve the older bulk reads used explicitly by group management.
         result = candidature_service.list_candidatures(
             desired_training=request.args.get("desired_training"),
             status=request.args.get("status"),
             search=request.args.get("search", ""),
-            page=page,
-            per_page=per_page,
         )
         return jsonify({"success": True, **result}), 200
+    except ValueError as error:
+        return jsonify({"success": False, "error": str(error)}), 400
     except Exception as error:
         return jsonify({
             "success": False,
@@ -144,6 +144,29 @@ def get_all_candidatures():
                 f"{error}"
             ),
         }), 500
+
+
+@candidature_bp.route("/candidatures/dashboard", methods=["GET"])
+@admin_required({"competences", "super_admin"})
+def get_candidates_dashboard():
+    try:
+        data = CandidatureReadRepository().dashboard(request.args.get("days"))
+        return jsonify({"success": True, "data": data})
+    except ValueError as error:
+        return jsonify({"success": False, "error": str(error)}), 400
+
+
+@candidature_bp.route("/candidatures/export", methods=["GET"])
+@admin_required({"competences", "super_admin"})
+def export_all_candidates():
+    try:
+        stream = export_candidates(request.args.to_dict())
+        return Response(stream_with_context(stream), content_type="text/csv; charset=utf-8", headers={
+            "Content-Disposition": "attachment; filename=candidats-competences.csv",
+            "Cache-Control": "no-store",
+        })
+    except ValueError as error:
+        return jsonify({"success": False, "error": str(error)}), 400
 
 
 @candidature_bp.route("/candidature-campaigns", methods=["GET"])

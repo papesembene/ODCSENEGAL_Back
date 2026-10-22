@@ -47,6 +47,10 @@ class Candidature(Document):
             {'fields': ['desired_training', 'status', '-created_at']},
             {'fields': ['desired_training', 'email']},
             {'fields': ['desired_training', 'phone']},
+            {'fields': ['-created_at', '-id']},
+            {'fields': ['desired_training', '-created_at', '-id']},
+            {'fields': ['status', '-created_at', '-id']},
+            {'fields': ['desired_training', 'status', '-created_at', '-id']},
         ]
     }
 

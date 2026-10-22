@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta
 from bson import ObjectId
-import re
 
 from mongoengine.errors import NotUniqueError, ValidationError
 
@@ -11,6 +10,7 @@ from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
 from app.models.test_session import TestSession
+from app.utils.search import text_search_filter
 
 
 class TestSessionServiceError(Exception):
@@ -169,21 +169,13 @@ class TestSessionService:
         if test_id and test_id != "all":
             query_filters["testId"] = test_id
 
-        search = (filters.get("search") or "").strip()
-        query = TestSession.objects(**query_filters)
-        if search:
-            search = re.escape(search[:150])
-            query = query.filter(
-                __raw__={
-                    "$or": [
-                        {"candidateEmail": {"$regex": search, "$options": "i"}},
-                        {"candidateName": {"$regex": search, "$options": "i"}},
-                        {"candidatePhone": {"$regex": search, "$options": "i"}},
-                    ]
-                }
-            )
-
-        return query
+        try:
+            search = text_search_filter(filters.get("search"), (
+                "candidateEmail", "candidateName", "candidatePhone",
+            ), ("candidatePhone",))
+        except ValueError as error:
+            raise TestSessionServiceError(str(error)) from error
+        return TestSession.objects(**query_filters).filter(__raw__=search)
 
     @staticmethod
     def _get_tests_by_id(sessions):

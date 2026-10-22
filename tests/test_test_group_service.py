@@ -15,6 +15,13 @@ class FakeGroupQuerySet(list):
 
 
 class TestGroupServiceUnitTest(unittest.TestCase):
+    def test_group_summaries_do_not_fetch_all_candidate_details(self):
+        payload = {"id": "group-1", "candidate_ids": ["candidate-1"], "candidate_count": 1}
+        group = SimpleNamespace(to_dict=lambda: payload, candidate_ids=["candidate-1"])
+        with patch("app.services.tests.test_group_service.Candidature.objects") as query:
+            self.assertEqual(payload, TestGroupService.serialize_group(group, compact=True))
+            query.assert_not_called()
+
     def test_local_invitations_are_simulated_only_without_a_provider(self):
         module = "app.services.tests.test_group_service"
         for configured in (True, False):
