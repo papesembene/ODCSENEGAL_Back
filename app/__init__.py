@@ -1,5 +1,11 @@
 # odcdeploye\backend\app\__init__.py
- 
+import os
+from dotenv import load_dotenv
+
+# Allow Windows services to use a private production env file while keeping the
+# development .env untouched. Existing process environment variables win.
+load_dotenv(os.getenv("ODC_ENV_FILE") or None, override=False)
+
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
@@ -7,10 +13,9 @@ from app.database import db
 from flask_mail import Mail
 from flask_session import Session
 from app.services.email_service import EmailService
-import os
-from dotenv import load_dotenv
 from flask.json.provider import DefaultJSONProvider
 from app.utils.error_handlers import register_error_handlers
+
 from app.config import Config
  
 # Initialisation des extensions
