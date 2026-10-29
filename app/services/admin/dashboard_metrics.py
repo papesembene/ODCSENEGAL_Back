@@ -8,6 +8,11 @@ from app.models.startup import Startup
 from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
+from app.services.tests.campaign_scope import (
+    current_campaign_year,
+    test_ids_for_campaign,
+    tests_for_campaign,
+)
 
 
 FORMATIONS = (
@@ -26,8 +31,9 @@ class DashboardMetricsService:
     def totals(self, now):
         competences = Candidature.objects.count()
         startups = Startup.objects(startup_name__ne=None).count()
-        active_tests = Test.objects(status="active").count()
-        scheduled_tests = Test.objects(
+        campaign_tests = tests_for_campaign(current_campaign_year())
+        active_tests = campaign_tests.filter(status="active").count()
+        scheduled_tests = campaign_tests.filter(
             status__in=["scheduled", "active"]
         ).count()
         upcoming_events = Event.objects(date__gte=now).count()
@@ -35,7 +41,9 @@ class DashboardMetricsService:
         return {
             "competences": competences,
             "startups": startups,
-            "total": competences + startups,
+            # Headline candidatures count the selected annual collection only.
+            # Startup applications remain a separate metric.
+            "total": competences,
             "active_tests": active_tests,
             "scheduled_tests": scheduled_tests,
             "upcoming_events": upcoming_events,
@@ -73,8 +81,11 @@ class DashboardMetricsService:
 
     def modules(self, now, totals):
         result_collection = TestResult._get_collection()
-        tested = result_collection.count_documents({})
-        admitted = result_collection.count_documents({"status": "admis"})
+        test_ids = test_ids_for_campaign(current_campaign_year())
+        tested = result_collection.count_documents({"testId": {"$in": test_ids}})
+        admitted = result_collection.count_documents({
+            "testId": {"$in": test_ids}, "status": "admis",
+        })
         return {
             "competences": {
                 "total": totals["competences"],
@@ -117,17 +128,10 @@ class DashboardMetricsService:
         )
         current = Candidature.objects(
             created_at__gte=this_month
-        ).count() + Startup.objects(
-            startup_name__ne=None,
-            createdAt__gte=this_month,
         ).count()
         previous = Candidature.objects(
             created_at__gte=previous_month,
             created_at__lt=this_month,
-        ).count() + Startup.objects(
-            startup_name__ne=None,
-            createdAt__gte=previous_month,
-            createdAt__lt=this_month,
         ).count()
         if previous:
             return round((current - previous) / previous * 100, 0)

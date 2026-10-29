@@ -42,6 +42,15 @@ partages dans des messages doivent etre renouveles avant ouverture publique.
 dedie autorise uniquement sur cette base, pas le compte administrateur MongoDB.
 Les donnees persistantes sont les volumes d'uploads, Redis et la base MongoDB.
 
+`CANDIDATURE_COLLECTION` choisit la collection MongoDB utilisee pour les
+candidatures (par exemple `candidatures_2026`). La collection historique reste
+intacte, mais les pages d'administration de cette version afficheront la
+collection choisie; elles ne fusionnent pas automatiquement les annees. Les
+entretiens, groupes de tests et autres donnees lies aux anciens identifiants de
+candidats doivent donc etre verifies avant de changer cette valeur en production.
+Creer/configurer les index et valider le parcours complet en preproduction avant
+la bascule. Ne pas activer cette option sur le site public sans cette recette.
+
 Choisir explicitement `EMAIL_PROVIDER=brevo`, `brevo_smtp`, `sendgrid` ou `smtp`.
 Pour le relais de l'ancienne version, recuperer uniquement sa configuration email
 autorisee: serveur, port, TLS/SSL, expediteur et identifiants. Avec Brevo HTTP,

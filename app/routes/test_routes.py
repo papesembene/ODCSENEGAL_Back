@@ -46,7 +46,7 @@ def get_all_tests():
     try:
         return jsonify({
             'success': True,
-            'data': test_management_service.list_tests(),
+            'data': test_management_service.list_tests(request.args.get('campaign_year')),
         }), 200
     except Exception as e:
         return jsonify({
@@ -65,6 +65,7 @@ def get_test_sessions():
             "search": request.args.get("search"),
             "page": request.args.get("page"),
             "per_page": request.args.get("per_page"),
+            "campaign_year": request.args.get("campaign_year"),
         })
         return jsonify({
             "success": True,
@@ -436,6 +437,7 @@ def get_statistics():
             'success': True,
             'data': test_management_service.get_statistics(
                 request.args.get('referentiel'),
+                request.args.get('campaign_year'),
             ),
         }), 200
        
@@ -452,7 +454,9 @@ def get_performance_stats():
     try:
         return jsonify({
             'success': True,
-            'data': test_management_service.get_performance_statistics(),
+            'data': test_management_service.get_performance_statistics(
+                campaign_year=request.args.get('campaign_year'),
+            ),
         }), 200
        
     except Exception as e:

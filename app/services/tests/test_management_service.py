@@ -8,6 +8,7 @@ from mongoengine.errors import ValidationError
 from app.models.test import Question, Test
 from app.models.test_result import Candidate, TestResult
 from app.services.tests.test_scoring import calculate_test_score
+from app.services.tests.campaign_scope import current_campaign_year, tests_for_campaign
 
 
 class TestServiceError(Exception):
@@ -39,8 +40,8 @@ class TestManagementService:
     )
 
     @staticmethod
-    def list_tests():
-        return [test.to_dict() for test in Test.objects()]
+    def list_tests(campaign_year=None):
+        return [test.to_dict() for test in tests_for_campaign(campaign_year)]
 
     @staticmethod
     def get_test(test_id):
@@ -65,6 +66,7 @@ class TestManagementService:
             description=data.get("description", ""),
             questions=questions,
             status=data.get("status", "active"),
+            campaignYear=current_campaign_year(),
             createdBy=data.get("createdBy", ""),
         )
         try:
@@ -204,16 +206,21 @@ class TestManagementService:
         return result
 
     @staticmethod
-    def get_statistics(referentiel=None):
+    def get_statistics(referentiel=None, campaign_year=None):
         from app.services.tests.test_result_queries import TestResultQueries
-        return TestResultQueries.statistics({"referentiel": referentiel})
+        return TestResultQueries.statistics({
+            "referentiel": referentiel,
+            "campaign_year": campaign_year,
+        })
 
     @staticmethod
-    def get_performance_statistics(now=None):
+    def get_performance_statistics(now=None, campaign_year=None):
         from app.services.tests.test_result_queries import TestResultQueries
+        from app.services.tests.test_result_queries import result_query
         now = now or datetime.utcnow()
-        all_results = TestResult.objects()
-        performance = TestResultQueries.performance_by_referential()
+        filters = {"campaign_year": campaign_year}
+        all_results = result_query(filters)
+        performance = TestResultQueries.performance_by_referential(filters)
 
         monthly = []
         month_names = (
@@ -242,7 +249,7 @@ class TestManagementService:
                 if month == 12
                 else datetime(year, month + 1, 1)
             )
-            results = TestResult.objects(
+            results = all_results.filter(
                 completedAt__gte=start,
                 completedAt__lt=end,
             )

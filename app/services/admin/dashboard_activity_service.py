@@ -6,6 +6,7 @@ from app.models.candidature import Candidature
 from app.models.event import Event, Registration
 from app.models.startup import Startup
 from app.models.test_group import TestGroup
+from app.services.tests.test_group_service import TestGroupService
 
 
 def _relative_time(now, value):
@@ -43,7 +44,9 @@ class DashboardActivityService:
             )
 
     def _append_groups(self, activities, now):
-        rows = TestGroup.objects.order_by("-created_at").limit(2)
+        rows = TestGroup.objects(
+            __raw__=TestGroupService._campaign_group_query(),
+        ).order_by("-created_at").limit(2)
         for group in rows:
             if not group.created_at:
                 continue

@@ -33,6 +33,7 @@ class Test(Document):
     description = StringField()
     questions = ListField(EmbeddedDocumentField(Question))
     status = StringField(required=True, choices=['active', 'scheduled', 'completed', 'draft'], default='active')
+    campaignYear = IntField(default=lambda: datetime.utcnow().year)
     
     # Logs et statistiques
     connectionLogs = ListField(EmbeddedDocumentField(ConnectionLog))
@@ -50,6 +51,7 @@ class Test(Document):
             'referentiel',
             'status',
             'createdAt',
+            'campaignYear',
             'candidatesGroup',
             {'fields': ['referentiel', 'status']},
             {'fields': ['status', 'scheduledDate', 'scheduledTime']},
@@ -94,6 +96,7 @@ class Test(Document):
             'totalConnections': self.totalConnections or 0,
             'totalCompleted': self.totalCompleted or 0,
             'createdAt': self.createdAt.isoformat() if self.createdAt else None,
+            'campaignYear': self.campaignYear,
             'createdBy': self.createdBy,
             'updatedAt': self.updatedAt.isoformat() if self.updatedAt else None,
             'updatedBy': self.updatedBy

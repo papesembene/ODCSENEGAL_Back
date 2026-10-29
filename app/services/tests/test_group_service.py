@@ -11,6 +11,10 @@ from app.models.test_group import TestGroup
 from app.services.test_email_service import TestEmailService
 from app.services.tests.formation_catalog import FORMATIONS, formation_aliases
 from app.repositories.candidature_filters import candidate_filter
+from app.services.tests.campaign_scope import (
+    normalize_campaign_year,
+    test_ids_for_campaign,
+)
 
 
 class TestGroupServiceError(Exception):
@@ -32,7 +36,7 @@ class TestGroupService:
     )
 
     @staticmethod
-    def list_groups(formation=None, status=None):
+    def list_groups(formation=None, status=None, campaign_year=None):
         filters = {}
         if formation and formation != "all":
             filters["formation__in"] = formation_aliases(formation)
@@ -40,7 +44,9 @@ class TestGroupService:
             filters["status"] = status
         else:
             filters["status__ne"] = "cancelled"
-        groups = TestGroup.objects(**filters).order_by("-created_at")
+        groups = TestGroup.objects(**filters).filter(
+            __raw__=TestGroupService._campaign_group_query(campaign_year),
+        ).order_by("-created_at")
         return [
             TestGroupService._serialize_group(group, compact=True)
             for group in groups
@@ -226,19 +232,22 @@ class TestGroupService:
         return self._build_invitation_response(group, result)
 
     @staticmethod
-    def get_statistics(formation=None):
+    def get_statistics(formation=None, campaign_year=None):
         filters = (
             {"formation__in": formation_aliases(formation)}
             if formation and formation != "all"
             else {}
         )
-        groups = TestGroup.objects(**filters)
+        campaign_query = TestGroupService._campaign_group_query(campaign_year)
+        groups = TestGroup.objects(**filters).filter(__raw__=campaign_query)
         payload = TestGroupService._group_counts(groups)
         payload["formationStats"] = {}
         for item in TestGroupService.FORMATIONS:
             payload["formationStats"][item] = (
                 TestGroupService._group_counts(
-                    TestGroup.objects(formation__in=formation_aliases(item)),
+                    TestGroup.objects(
+                        formation__in=formation_aliases(item),
+                    ).filter(__raw__=campaign_query),
                 )
             )
         return payload
@@ -280,12 +289,34 @@ class TestGroupService:
         groups = TestGroup.objects(
             formation__in=formation_aliases(formation),
             status__ne="cancelled",
+        ).filter(
+            __raw__=TestGroupService._campaign_group_query(),
         ).only("candidate_ids")
 
         for group in groups:
             assigned_ids.update(group.candidate_ids or [])
 
         return assigned_ids
+
+    @staticmethod
+    def _campaign_group_query(campaign_year=None):
+        year = normalize_campaign_year(campaign_year)
+        if year is None:
+            return {}
+        start = datetime(year, 1, 1)
+        end = datetime(year + 1, 1, 1)
+        test_ids = test_ids_for_campaign(year)
+        return {
+            "$or": [
+                {"test_id": {"$in": test_ids}},
+                {
+                    "$and": [
+                        {"test_id": {"$in": [None, ""]}},
+                        {"test_date": {"$gte": start, "$lt": end}},
+                    ]
+                },
+            ]
+        }
 
     @staticmethod
     def _ensure_candidates_exist(candidate_ids):
@@ -305,6 +336,8 @@ class TestGroupService:
             formation__in=formation_aliases(formation),
             status__ne="cancelled",
             candidate_ids__in=candidate_ids,
+        ).filter(
+            __raw__=TestGroupService._campaign_group_query(),
         ).only("name", "candidate_ids")
 
         for group in groups:

@@ -1,6 +1,12 @@
 from app import db
 from mongoengine import Document, StringField, BooleanField, DateField, DateTimeField
 from datetime import datetime
+import os
+
+
+# Keep the historical collection as the default. Production can select a new
+# annual collection explicitly through its private environment configuration.
+CANDIDATURE_COLLECTION = os.getenv("CANDIDATURE_COLLECTION", "candidature").strip()
 
 class Candidature(Document):
     first_name = StringField(required=True)
@@ -35,6 +41,7 @@ class Candidature(Document):
     
 
     meta = {
+        'collection': CANDIDATURE_COLLECTION,
         'indexes': [
             'email',
             'phone',

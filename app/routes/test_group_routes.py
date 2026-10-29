@@ -25,6 +25,7 @@ def get_all_test_groups():
         groups = test_group_service.list_groups(
             formation=request.args.get("formation"),
             status=request.args.get("status"),
+            campaign_year=request.args.get("campaign_year"),
         )
         return jsonify({
             "success": True,
@@ -226,6 +227,7 @@ def get_test_groups_statistics():
             "success": True,
             "data": test_group_service.get_statistics(
                 request.args.get("formation"),
+                request.args.get("campaign_year"),
             ),
         }), 200
     except Exception as error:

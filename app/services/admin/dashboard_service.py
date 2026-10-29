@@ -11,6 +11,7 @@ from app.services.admin.dashboard_distributions import (
     DashboardDistributionService,
 )
 from app.services.admin.dashboard_metrics import DashboardMetricsService
+from app.services.tests.campaign_scope import current_campaign_year
 
 
 class AdminDashboardService:
@@ -26,6 +27,7 @@ class AdminDashboardService:
         return {
             "globalStats": {
                 "totalCandidatures": totals["total"],
+                "campaignYear": current_campaign_year(),
                 "candidaturesCompetences": totals["competences"],
                 "candidaturesStartups": totals["startups"],
                 "testsProgrammes": totals["scheduled_tests"],
@@ -65,7 +67,8 @@ class AdminDashboardService:
             "success": True,
             "data": {
                 "globalStats": {
-                    "totalCandidatures": competences + startups,
+                    "totalCandidatures": competences,
+                    "campaignYear": current_campaign_year(),
                     "candidaturesCompetences": competences,
                     "candidaturesStartups": startups,
                     "testsProgrammes": 0,

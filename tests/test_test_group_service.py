@@ -10,6 +10,9 @@ from app.services.tests.test_group_service import (
 
 
 class FakeGroupQuerySet(list):
+    def filter(self, **_filters):
+        return self
+
     def only(self, *_fields):
         return self
 
@@ -96,9 +99,12 @@ class TestGroupServiceUnitTest(unittest.TestCase):
             candidate_ids=["candidate-1"],
         )
 
-        with patch(
-            "app.services.tests.test_group_service.TestGroup.objects",
-            return_value=FakeGroupQuerySet([group]),
+        with (
+            patch.object(TestGroupService, "_campaign_group_query", return_value={}),
+            patch(
+                "app.services.tests.test_group_service.TestGroup.objects",
+                return_value=FakeGroupQuerySet([group]),
+            ),
         ):
             with self.assertRaises(TestGroupServiceError) as context:
                 TestGroupService._ensure_candidates_available(
@@ -116,9 +122,12 @@ class TestGroupServiceUnitTest(unittest.TestCase):
             candidate_ids=["candidate-1"],
         )
 
-        with patch(
-            "app.services.tests.test_group_service.TestGroup.objects",
-            return_value=FakeGroupQuerySet([group]),
+        with (
+            patch.object(TestGroupService, "_campaign_group_query", return_value={}),
+            patch(
+                "app.services.tests.test_group_service.TestGroup.objects",
+                return_value=FakeGroupQuerySet([group]),
+            ),
         ):
             TestGroupService._ensure_candidates_available(
                 candidate_ids=["candidate-1"],

@@ -11,6 +11,7 @@ from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
 from app.models.test_session import TestSession
 from app.utils.search import text_search_filter
+from app.services.tests.campaign_scope import test_ids_for_campaign
 
 
 class TestSessionServiceError(Exception):
@@ -87,7 +88,9 @@ class TestSessionService:
 
     def list_admin_sessions(self, filters=None):
         filters = filters or {}
-        self.refresh_expired_sessions(filters.get("testId"))
+        self.refresh_expired_sessions(
+            filters.get("testId"), filters.get("campaign_year"),
+        )
         query = self._build_admin_query(filters)
         page = max(self._safe_int(filters.get("page"), 1), 1)
         per_page = min(max(self._safe_int(filters.get("per_page"), 20), 1), 100)
@@ -116,11 +119,17 @@ class TestSessionService:
             "per_page": per_page,
         }
 
-    def refresh_expired_sessions(self, test_id=None):
+    def refresh_expired_sessions(self, test_id=None, campaign_year=None):
         filters = {"status": "in_progress"}
         if test_id and test_id != "all":
             filters["testId"] = test_id
 
+        campaign_test_ids = test_ids_for_campaign(campaign_year)
+        if test_id and test_id != "all":
+            if test_id not in campaign_test_ids:
+                return
+        else:
+            filters["testId__in"] = campaign_test_ids
         test_ids = TestSession.objects(**filters).distinct("testId")
         valid_ids = [value for value in test_ids if ObjectId.is_valid(value)]
         for test in Test.objects(id__in=valid_ids).only("id", "scheduledDate", "scheduledTime", "duration"):
@@ -175,7 +184,18 @@ class TestSessionService:
             ), ("candidatePhone",))
         except ValueError as error:
             raise TestSessionServiceError(str(error)) from error
-        return TestSession.objects(**query_filters).filter(__raw__=search)
+        sessions = TestSession.objects(**query_filters)
+        if filters.get("campaign_year") != "all":
+            test_ids = test_ids_for_campaign(filters.get("campaign_year"))
+            selected_test_id = query_filters.get("testId")
+            if selected_test_id:
+                if selected_test_id not in test_ids:
+                    sessions = TestSession.objects(id__in=[])
+            else:
+                sessions = sessions.filter(
+                    __raw__={"testId": {"$in": test_ids}},
+                )
+        return sessions.filter(__raw__=search)
 
     @staticmethod
     def _get_tests_by_id(sessions):

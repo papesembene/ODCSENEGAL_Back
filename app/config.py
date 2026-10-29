@@ -1,7 +1,7 @@
 # config.py
 from dotenv import load_dotenv
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from app.runtime_config import env_int
 from urllib.parse import urlsplit
 
@@ -9,6 +9,10 @@ load_dotenv()
 
 class Config:
     ENVIRONMENT = os.getenv("FLASK_ENV", "development")
+    ODC_CAMPAIGN_YEAR = env_int(
+        "ODC_CAMPAIGN_YEAR", datetime.utcnow().year,
+        minimum=2000, maximum=2100,
+    )
     ELASTIC_APM = {
         'SERVICE_NAME': os.getenv('ELASTIC_APM_SERVICE_NAME'),
         'SECRET_TOKEN': os.getenv('ELASTIC_APM_SECRET_TOKEN'),

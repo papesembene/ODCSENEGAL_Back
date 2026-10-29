@@ -10,6 +10,7 @@ from app.models.test import Test
 from app.models.test_result import TestResult
 from app.models.test_violation import TestViolation
 from app.services.tests.formation_catalog import formation_aliases
+from app.services.tests.campaign_scope import test_ids_for_campaign
 from app.utils.search import text_search_filter
 
 
@@ -34,7 +35,12 @@ def result_query(filters):
     search = text_search_filter(filters.get("search"), (
         "candidate.name", "candidate.email", "candidate.phone", "testTitle", "referentiel",
     ), ("candidate.phone",))
-    return TestResult.objects(**query).filter(__raw__=search)
+    results = TestResult.objects(**query)
+    campaign_year = filters.get("campaign_year")
+    if campaign_year != "all":
+        ids = test_ids_for_campaign(campaign_year)
+        results = results.filter(__raw__={"testId": {"$in": ids}})
+    return results.filter(__raw__=search)
 
 
 def positive_integer(value, default, maximum=None):
@@ -128,8 +134,8 @@ class TestResultQueries:
                 "score_distribution": [{"range": f"{lower}-{lower + 20}", "count": row.get(f"bin_{lower}", 0)} for lower in range(0, 100, 20)]}
 
     @staticmethod
-    def performance_by_referential():
-        rows = TestResult.objects.aggregate([{"$group": {
+    def performance_by_referential(filters=None):
+        rows = result_query(filters or {}).aggregate([{"$group": {
             "_id": "$referentiel", "total": {"$sum": 1}, "total_score": {"$sum": "$score"},
             "admis": {"$sum": {"$cond": [{"$eq": ["$status", "admis"]}, 1, 0]}},
             "rejetes": {"$sum": {"$cond": [{"$eq": ["$status", "rejeté"]}, 1, 0]}},
