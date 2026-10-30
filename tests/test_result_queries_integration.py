@@ -8,6 +8,7 @@ import unittest
 from uuid import uuid4
 
 from bson import ObjectId
+from flask import Flask
 from mongoengine import connect, disconnect
 from pymongo.monitoring import CommandListener
 
@@ -44,10 +45,16 @@ class ResultQueriesIntegrationTest(unittest.TestCase):
         cls.addClassCleanup(cls.client.drop_database, cls.name)
 
     def setUp(self):
+        app = Flask(__name__)
+        app.config["ODC_CAMPAIGN_YEAR"] = 2026
+        context = app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
         for model in (Test, TestResult, TestViolation):
             model.drop_collection()
             model.ensure_indexes()
         self.test = Test(title="Local pagination", referentiel="Dev Web", duration=60,
+                         campaignYear=2026,
                          scheduledDate="2026-10-21", scheduledTime="10:00", totalQuestions=1,
                          questions=[Question(question="Q", type="qcm_simple", score=5, correctAnswer=1)]).save()
         self.rows = [{"_id": ObjectId(f"{index + 1:024x}"), "testId": str(self.test.id),

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from bson import ObjectId
+from flask import Flask
 from mongoengine import connect, disconnect
 
 from app.models.candidature import Candidature
@@ -34,11 +35,17 @@ class DeliveryAndSessionsIntegrationTest(unittest.TestCase):
         cls.addClassCleanup(cls.connection.drop_database, cls.db_name)
 
     def setUp(self):
+        app = Flask(__name__)
+        app.config["ODC_CAMPAIGN_YEAR"] = 2026
+        context = app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
         for model in (EmailJob, TestGroup, TestResult, TestSession, TestViolation, Test, Candidature):
             model.drop_collection()
             model.ensure_indexes()
         self.now = datetime.utcnow()
         self.test = Test(title="Concurrency", referentiel="Dev Web", duration=60,
+                         campaignYear=2026,
                          scheduledDate=self.now.strftime("%Y-%m-%d"), scheduledTime=self.now.strftime("%H:%M"),
                          totalQuestions=1).save()
         self.candidate = {"email": "candidate@example.org", "phone": "770000000", "name": "Local Test"}
