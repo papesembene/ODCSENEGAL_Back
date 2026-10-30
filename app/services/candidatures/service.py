@@ -1,6 +1,8 @@
 """Use cases for public and administrative candidatures."""
 
 from datetime import datetime
+import logging
+import os
 
 from mongoengine.errors import NotUniqueError, ValidationError
 
@@ -10,6 +12,8 @@ from app.services.candidatures.campaign_service import (
     CandidatureCampaignServiceError,
 )
 from app.utils.request_guards import normalize_email, normalize_phone
+
+logger = logging.getLogger(__name__)
 
 
 class CandidatureServiceError(Exception):
@@ -104,7 +108,16 @@ class CandidatureService:
             contract_type=data.get("contract_type", ""),
         )
         try:
-            return self.repository.save(candidature)
+            saved = self.repository.save(candidature)
+            saved.confirmation_email_queued = False
+            if os.getenv("EMAIL_DELIVERY_MODE", "sync").lower() == "queued":
+                try:
+                    from app.services.candidature_notification_service import CandidatureNotificationService
+                    CandidatureNotificationService().enqueue_confirmation(saved)
+                    saved.confirmation_email_queued = True
+                except Exception:
+                    logger.exception("Impossible de mettre la confirmation en file")
+            return saved
         except NotUniqueError as error:
             raise CandidatureServiceError(
                 "Une candidature avec cet email ou ce numéro de pièce "
@@ -208,31 +221,11 @@ class CandidatureService:
         }
 
     def prepare_email_batch(self, data):
-        candidate_ids = data.get("candidateIds", [])
-        if not candidate_ids:
-            raise CandidatureServiceError(
-                "Aucun candidat sélectionné",
-            )
-        candidatures = self.repository.list_by_ids(candidate_ids)
-        count = candidatures.count()
-        email_type = data.get("emailType")
-        labels = {
-            "interview_invitation": "d'invitation à l'entretien",
-            "acceptance": "d'acceptation",
-            "rejection": "de refus",
-            "information": "d'information",
-        }
-        return {
-            "message": (
-                f"Email {labels.get(email_type, '')} envoyé à "
-                f"{count} candidat(s)"
-            ),
-            "emails": [item.email for item in candidatures],
-            "custom_message": data.get("customMessage", ""),
-            "sent": count,
-            "type": email_type,
-            "timestamp": self.now().isoformat(),
-        }
+        try:
+            from app.services.candidature_notification_service import CandidatureNotificationService
+            return CandidatureNotificationService().enqueue_batch(data)
+        except ValueError as error:
+            raise CandidatureServiceError(str(error), 400) from error
 
     def _validate_submission(self, data):
         if not data:

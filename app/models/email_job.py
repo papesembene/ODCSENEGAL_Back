@@ -7,7 +7,10 @@ from mongoengine import DateTimeField, DictField, Document, IntField, StringFiel
 class EmailJob(Document):
     dedup_key = StringField(required=True, unique=True)
     batch_key = StringField(required=True)
-    kind = StringField(default="test_invitation", choices=["test_invitation", "test_result"])
+    kind = StringField(default="test_invitation", choices=[
+        "test_invitation", "test_result", "candidature_confirmation",
+        "candidature_notification",
+    ])
     group_id = StringField(default="")
     candidate_id = StringField(required=True)
     payload = DictField(default=dict)

@@ -95,6 +95,7 @@ def apply():
     return jsonify(
         message="Candidature enregistrée avec succès",
         candidature_id=str(candidature.id),
+        email_status=("queued" if getattr(candidature, "confirmation_email_queued", False) else "not_queued"),
     ), 201
 
 
@@ -300,27 +301,17 @@ def get_statistics():
 @admin_required({"competences", "super_admin"})
 def send_emails_to_candidates():
     try:
-        batch = candidature_service.prepare_email_batch(
-            request.get_json() or {},
-        )
-        logger.info(
-            "Simulation email candidatures type=%s destinataires=%s",
-            batch["type"],
-            len(batch["emails"]),
-        )
+        batch = candidature_service.prepare_email_batch(request.get_json() or {})
         return jsonify({
             "success": True,
-            "message": batch["message"],
-            "data": {
-                "sent": batch["sent"],
-                "type": batch["type"],
-                "timestamp": batch["timestamp"],
-            },
-        }), 200
+            "message": "Emails pris en charge par la file d'envoi",
+            "data": batch,
+        }), 202
     except CandidatureServiceError as error:
         return admin_error_response(error)
-    except Exception as error:
+    except Exception:
+        logger.exception("Erreur lors de la mise en file des emails candidature")
         return jsonify({
             "success": False,
-            "error": f"Erreur lors de l'envoi des emails : {error}",
+            "error": "Impossible de mettre les emails en file d'envoi",
         }), 500

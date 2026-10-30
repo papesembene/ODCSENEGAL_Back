@@ -44,6 +44,7 @@ class EmailOutbox:
     def run_once(self):
         from app.services.invitation_queue import InvitationQueue
         from app.services.result_notification_service import ResultNotificationService
+        from app.services.candidature_notification_service import CandidatureNotificationService
 
         now = self.now()
         EmailJob.objects(status="sending", locked_until__lte=now, attempts__gte=self.max_attempts).update(
@@ -59,7 +60,12 @@ class EmailOutbox:
         )
         if not job:
             return False
-        handler = ResultNotificationService if job.kind == "test_result" else InvitationQueue
+        handlers = {
+            "test_result": ResultNotificationService,
+            "candidature_confirmation": CandidatureNotificationService,
+            "candidature_notification": CandidatureNotificationService,
+        }
+        handler = handlers.get(job.kind, InvitationQueue)
         try:
             message = handler.prepare(job, now)
             if message is None:
