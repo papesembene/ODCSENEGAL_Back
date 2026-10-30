@@ -12,8 +12,9 @@ serveur et lancer le script depuis le dépôt `odc-test`:
 & "C:\Orange Digital Center\odc-test\backend\ops\deployment\register-production-email-worker.ps1"
 ```
 
-Il lit la release de la tâche `ODC-TEST-PROD-API`, crée ou actualise la tâche
-du worker, puis la démarre. Le worker démarre aussi après un redémarrage de
+Il lit la release du service API NSSM publié par IIS. En l'absence de service
+NSSM, il utilise le lanceur de la tâche historique `ODC-TEST-PROD-API`.
+Il crée ou actualise la tâche du worker, puis la démarre. Le worker démarre aussi après un redémarrage de
 Windows et son lanceur le relance s'il s'arrête.
 
 Vérifier l'état et le journal avec les chemins affichés par le script:

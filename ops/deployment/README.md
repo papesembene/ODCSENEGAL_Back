@@ -10,7 +10,8 @@ Le monitoring technique existant est facultatif et n'est pas lance ici.
 Le seul port publie est `127.0.0.1:8085`, sur le serveur Docker. Aucun port MongoDB,
 Redis, API ou frontend n'est ouvert publiquement. Ce compose cible Linux avec
 Docker Engine et Compose v2+, pas l'ancien dossier de production Windows.
-Pour la recette Windows deja en place, suivre `WINDOWS_TEST.md` sans Docker.
+Pour la production Windows actuelle sous NSSM, suivre `WINDOWS_PRODUCTION_API.md`
+et `WINDOWS_PRODUCTION_EMAIL.md` sans Docker.
 
 ## Avant de lancer
 
