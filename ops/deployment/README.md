@@ -176,8 +176,8 @@ a chaque push et pull request, chaque lundi a 07:15 UTC et sur lancement manuel 
 - `Python dependency vulnerabilities` : pip-audit 2.10.1 analyse `requirements.txt`
   et les dependances transitives. Toute vulnerabilite connue signalee ou erreur
   d'execution fait echouer ce controle. Aucune vulnerabilite n'est ignoree.
-- `Python code security` : Bandit 1.9.4 analyse `app`, `run.py`, `email_worker.py`
-  et `preflight.py`. Les alertes de gravite moyenne ou elevee et de confiance
+- `Python code security` : Bandit 1.9.4 analyse `app`, `run.py`, `email_worker.py`,
+  `preflight.py` et `ops/deployment/production_backup.py`. Les alertes de gravite moyenne ou elevee et de confiance
   moyenne ou elevee font echouer le controle. Les alertes faibles ne bloquent pas.
 
 Les outils s'installent dans un environnement separe de celui de l'application.

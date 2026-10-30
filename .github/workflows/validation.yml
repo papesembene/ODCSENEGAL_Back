@@ -3,6 +3,15 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  deployment-safety:
+    name: Windows deployment retention safety
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release retention and junction preservation on disposable files
+        shell: powershell
+        run: '& .\ops\deployment\Test-ProductionRetention.ps1'
   tests:
     # MongoDB 8.0 refuses kernels >= 6.19 (SERVER-121912).
     # Ubuntu 24.04 runners also use kernel 7.0; 22.04 currently uses 6.8.

@@ -1,95 +1,108 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param()
-
-$ErrorActionPreference = 'Stop'
-$taskName = 'ODC-TEST-PROD-EMAIL-WORKER'
-$apiTaskName = 'ODC-TEST-PROD-API'
-
-$apiTask = Get-ScheduledTask -TaskName $apiTaskName -ErrorAction Stop
-$apiAction = $apiTask.Actions | Select-Object -First 1
-$runnerMatch = [regex]::Match($apiAction.Arguments, '-File\s+"([^"]+\.ps1)"')
-if (-not $runnerMatch.Success) {
-    throw "Impossible de trouver le lanceur de la tâche $apiTaskName."
-}
-
-$apiRunner = $runnerMatch.Groups[1].Value
-$releaseRoot = Split-Path -Parent $apiRunner
-if (-not (Test-Path -LiteralPath $apiRunner -PathType Leaf)) {
-    throw "Lanceur de l'API introuvable: $apiRunner"
-}
-
-# The API runner may live in a release folder while its backend code lives
-# elsewhere. Read the backend directory from that runner instead of guessing
-# that it is a child of the release folder.
-$apiRunnerText = Get-Content -LiteralPath $apiRunner -Raw
-$backendMatch = [regex]::Match($apiRunnerText, "(?m)^\s*\`$backend\s*=\s*'([^']+)'\s*$")
-if (-not $backendMatch.Success) {
-    throw "Impossible de trouver le chemin `$backend dans le lanceur API: $apiRunner"
-}
-$backend = $backendMatch.Groups[1].Value
-$python = Join-Path $backend '.venv\Scripts\python.exe'
-$worker = Join-Path $backend 'email_worker.py'
-$envFile = Join-Path $backend '.env.production'
-# Once IIS publishes an NSSM service, its release and explicit environment are
-# authoritative; the disabled historical task is retained only for rollback.
-$serviceHelper = Join-Path $PSScriptRoot 'BackendService.Common.ps1'
-if ((Get-Service -Name 'ODC-PROD-API','ODC-PROD-API-SECONDARY' -ErrorAction SilentlyContinue)) {
-    if (-not (Test-Path -LiteralPath $serviceHelper -PathType Leaf)) { throw 'Helper API NSSM introuvable.' }
-    . $serviceHelper
-    $published = Get-PublishedBackendNssmContext
-    $backend = $published.Backend
-    $python = $published.Python
-    $worker = Join-Path $backend 'email_worker.py'
-    $envFile = $published.EnvFile
-    $releaseRoot = Split-Path -Parent $backend
-}
-foreach ($path in @($python, $worker, $envFile)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Fichier nécessaire introuvable: $path"
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'BackendService.Common.ps1')
+$context=Get-PublishedBackendNssmContext
+if (-not (Test-BackendHealth $context.Port).Healthy) { throw 'Published API is not healthy.' }
+$backend=$context.Backend
+$requiresHeartbeat=[IO.File]::ReadAllText((Join-Path $backend 'email_worker.py')).Contains('ODC_EMAIL_HEARTBEAT_FILE')
+$runner=Join-Path (Split-Path -Parent $backend) 'start-email-worker-production.ps1'
+$logs=Join-Path $backend 'ops-logs'
+$null=New-Item -ItemType Directory -Path $logs -Force
+$taskName='ODC-TEST-PROD-EMAIL-WORKER'
+$oldTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$oldXml=if ($oldTask) { Export-ScheduledTask -TaskName $taskName } else { $null }
+$oldRunner=if (Test-Path -LiteralPath $runner) { [IO.File]::ReadAllText($runner) } else { $null }
+$snapshot=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+$wrappers=@($snapshot | Where-Object { $_.Name -ieq 'powershell.exe' -and $_.CommandLine -match '-File\s+"(C:\\Orange Digital Center\\[^\"]+\\start-email-worker-production\.ps1)"' })
+$owned=@{}
+foreach ($wrapper in $wrappers) {
+    $owned[[string]$wrapper.ProcessId]=$wrapper
+    $pending=[Collections.Generic.Queue[uint32]]::new()
+    $pending.Enqueue([uint32]$wrapper.ProcessId)
+    while ($pending.Count) {
+        $parent=$pending.Dequeue()
+        foreach ($child in @($snapshot | Where-Object { $_.ParentProcessId -eq $parent })) {
+            if ($child.Name -ieq 'conhost.exe' -and $child.ExecutablePath -ieq (Join-Path $env:SystemRoot 'System32\conhost.exe')) { continue }
+            if ($child.Name -ine 'python.exe' -or $child.CommandLine -notmatch 'email_worker\.py') { throw 'Unexpected process in production worker tree.' }
+            $owned[[string]$child.ProcessId]=$child
+            $pending.Enqueue([uint32]$child.ProcessId)
+        }
     }
 }
-
-$workerRunner = Join-Path $releaseRoot 'start-email-worker-production.ps1'
-$log = Join-Path $backend 'email-worker-production.log'
-$runnerText = @'
-$ErrorActionPreference = 'Continue'
-$backend = '__BACKEND__'
-$python = '__PYTHON__'
-$env:ODC_ENV_FILE = '__ENVFILE__'
-Set-Location -LiteralPath $backend
-while ($true) {
-    "$(Get-Date -Format o) Worker email démarré" | Add-Content -LiteralPath '__LOG__'
-    & $python (Join-Path $backend 'email_worker.py') *>> '__LOG__'
-    "$(Get-Date -Format o) Worker arrêté (code $LASTEXITCODE), redémarrage dans 5 secondes" | Add-Content -LiteralPath '__LOG__'
-    Start-Sleep -Seconds 5
+$unknown=@($snapshot | Where-Object { $_.Name -ieq 'python.exe' -and $_.CommandLine -match 'email_worker\.py' -and $_.CommandLine -like '*C:\Orange Digital Center\*' -and -not $owned.ContainsKey([string]$_.ProcessId) })
+if ($unknown.Count) { throw 'Unrecognized email worker process; task unchanged.' }
+$template=@'
+$ErrorActionPreference='Stop'
+$backend='__BACKEND__'
+$env:ODC_ENV_FILE='__ENV__'
+$env:FLASK_ENV='production'
+$env:ODC_EMAIL_STOP_FILE='C:\Orange Digital Center\ops\backend-recovery\state\email-worker.stop'
+$env:ODC_EMAIL_HEARTBEAT_FILE='__HEARTBEAT__'
+while (-not (Test-Path -LiteralPath $env:ODC_EMAIL_STOP_FILE)) {
+    $child=Start-Process -FilePath '__PYTHON__' -ArgumentList ('"'+(Join-Path $backend 'email_worker.py')+'"') -WorkingDirectory $backend -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput '__STDOUT__' -RedirectStandardError '__STDERR__'
+    if (-not (Test-Path -LiteralPath $env:ODC_EMAIL_STOP_FILE)) { Start-Sleep -Seconds 5 }
 }
 '@
-$runnerText = $runnerText.Replace('__BACKEND__', $backend).Replace('__PYTHON__', $python).
-    Replace('__ENVFILE__', $envFile).Replace('__LOG__', $log)
-[void][scriptblock]::Create($runnerText)
-[System.IO.File]::WriteAllText($workerRunner, $runnerText, [System.Text.UTF8Encoding]::new($false))
-
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$action = New-ScheduledTaskAction -Execute $powershell -Argument (
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $workerRunner + '"'
-)
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -StartWhenAvailable -MultipleInstances IgnoreNew
-$task = New-ScheduledTask -Action $action -Trigger $trigger `
-    -Principal $apiTask.Principal -Settings $settings `
-    -Description 'Worker email ODC: invitations, résultats et confirmations de candidature.'
-Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
-Start-ScheduledTask -TaskName $taskName
-Start-Sleep -Seconds 3
-$state = (Get-ScheduledTask -TaskName $taskName).State
-if ($state -ne 'Running') {
-    throw "La tâche $taskName ne tourne pas (état: $state). Consulter le journal: $log"
+$text=$template.Replace('__BACKEND__',$backend).Replace('__ENV__',$context.EnvFile).Replace('__PYTHON__',$context.Python).Replace('__STDOUT__',(Join-Path $logs 'email-worker.stdout.log')).Replace('__STDERR__',(Join-Path $logs 'email-worker.stderr.log'))
+$heartbeat=Join-Path $logs 'email-worker.heartbeat'
+$text=$text.Replace('__HEARTBEAT__',$heartbeat)
+$null=[scriptblock]::Create($text)
+$stopFile='C:\Orange Digital Center\ops\backend-recovery\state\email-worker.stop'
+$null=New-Item -ItemType Directory -Path (Split-Path -Parent $stopFile) -Force
+$touched=$false
+try {
+    # New workers finish their current job before exiting; legacy workers get
+    # a bounded grace period before their verified process tree is stopped.
+    $null=New-Item -ItemType File -Path $stopFile -Force
+    $touched=$true
+    if ($oldTask) { Disable-ScheduledTask -TaskName $taskName | Out-Null }
+    $deadline=[DateTime]::UtcNow.AddSeconds(60)
+    while ($owned.Count -and [DateTime]::UtcNow -lt $deadline) {
+        $alive=@(Get-CimInstance Win32_Process | Where-Object { $owned.ContainsKey([string]$_.ProcessId) -and $_.CreationDate -eq $owned[[string]$_.ProcessId].CreationDate })
+        if (-not $alive.Count) { break }
+        Start-Sleep -Seconds 2
+    }
+    if ($oldTask -and (Get-ScheduledTask -TaskName $taskName).State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
+    foreach ($captured in @($wrappers)+@($owned.Values | Where-Object { $_.Name -ieq 'python.exe' })) {
+        $current=Get-CimInstance Win32_Process -Filter "ProcessId=$($captured.ProcessId)" -ErrorAction SilentlyContinue
+        if ($current -and $current.CreationDate -eq $captured.CreationDate -and $current.ExecutablePath -eq $captured.ExecutablePath) { Stop-Process -Id $current.ProcessId -ErrorAction Stop }
+    }
+    Remove-Item -LiteralPath $stopFile -Force
+    [IO.File]::WriteAllText($runner,$text,[Text.UTF8Encoding]::new($false))
+    $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $action=New-ScheduledTaskAction -Execute $powershell -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$runner+'"') -WorkingDirectory $backend
+    $settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew
+    $principal=New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
+    $definition=New-ScheduledTask -Action $action -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $settings -Principal $principal
+    Register-ScheduledTask -TaskName $taskName -InputObject $definition -Force | Out-Null
+    $started=[DateTime]::UtcNow
+    Start-ScheduledTask -TaskName $taskName
+    $ready=$false
+    for ($attempt=0;$attempt -lt 20;$attempt++) {
+        Start-Sleep -Seconds 1
+        $running=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'python.exe' -and $_.CommandLine -and $_.CommandLine.IndexOf((Join-Path $backend 'email_worker.py'),[StringComparison]::OrdinalIgnoreCase) -ge 0 })
+        $heartbeatReady=if ($requiresHeartbeat) { (Test-Path -LiteralPath $heartbeat) -and (Get-Item -LiteralPath $heartbeat).LastWriteTimeUtc -ge $started } else { ([DateTime]::UtcNow-$started).TotalSeconds -ge 3 }
+        if ($running.Count -gt 0 -and $heartbeatReady -and (Get-ScheduledTask -TaskName $taskName).State -eq 'Running') { $ready=$true; break }
+    }
+    if (-not $ready) { throw 'New email worker did not start.' }
+    Write-Output ('Worker email aligne et redemarre: '+$backend)
+} catch {
+    if ($touched) {
+        Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
+        $currentTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $newProcesses=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'python.exe' -and $_.CommandLine -and $_.CommandLine.IndexOf((Join-Path $backend 'email_worker.py'),[StringComparison]::OrdinalIgnoreCase) -ge 0 })
+        if ($currentTask -and $currentTask.State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
+        foreach ($captured in $newProcesses) {
+            $current=Get-CimInstance Win32_Process -Filter "ProcessId=$($captured.ProcessId)" -ErrorAction SilentlyContinue
+            if ($current -and $current.CreationDate -eq $captured.CreationDate -and $current.ExecutablePath -eq $captured.ExecutablePath) { Stop-Process -Id $current.ProcessId -ErrorAction Stop }
+        }
+        if ($null -ne $oldRunner) { [IO.File]::WriteAllText($runner,$oldRunner,[Text.UTF8Encoding]::new($false)) }
+        if ($oldXml) {
+            Register-ScheduledTask -TaskName $taskName -Xml $oldXml -Force | Out-Null
+            if ($oldTask.Settings.Enabled) { Start-ScheduledTask -TaskName $taskName }
+        } elseif ($currentTask) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
+    }
+    throw
 }
-
-Write-Host "Worker email actif sur la release: $backend"
-Write-Host "Tâche Windows: $taskName ($state)"
-Write-Host "Journal: $log"
-Write-Host 'Le worker n’envoie aucun message de test; il traite seulement la file MongoDB.'

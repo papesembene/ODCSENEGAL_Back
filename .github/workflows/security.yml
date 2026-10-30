@@ -57,7 +57,7 @@ jobs:
       - name: Check medium and high severity issues with medium or high confidence
         run: |
           mkdir -p security-reports
-          .security-venv/bin/python -m bandit -r app run.py email_worker.py preflight.py -ll -ii -f json -o security-reports/bandit.json
+          .security-venv/bin/python -m bandit -r app run.py email_worker.py preflight.py ops/deployment/production_backup.py -ll -ii -f json -o security-reports/bandit.json
       - name: Save code report even when the scan fails
         if: always()
         uses: actions/upload-artifact@v4

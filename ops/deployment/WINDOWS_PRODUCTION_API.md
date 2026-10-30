@@ -1,9 +1,10 @@
 # API de production Windows / IIS
 
-État vérifié le 30 octobre 2026 : service automatique `ODC-PROD-API`,
-API sur `127.0.0.1:5003`, code dans `odc-test/backend`. La configuration
-privée reste `odc-test/backend/.env.production`. Les deux règles IIS API
-pointent vers ce service. Le frontend reste sur le port 3005.
+IIS publie l'un des services automatiques `ODC-PROD-API` ou
+`ODC-PROD-API-SECONDARY`. Le chemin et le port changent selon les déploiements ;
+`Get-PublishedBackendNssmContext` les lit dans la configuration réelle.
+La configuration privée reste `odc-test/backend/.env.production`.
+Le frontend est déployé indépendamment.
 
 La tâche historique `ODC-TEST-PROD-API` est désactivée. Ne pas la réactiver
 pour dépanner le service. Le worker email reste une tâche séparée et utilise
@@ -33,14 +34,55 @@ Il refuse d'intervenir sur un processus dont le service ne possède pas le port.
 ## Déploiements suivants
 
 Enregistrer les changements du backend dans Git, vérifier les tests, puis
-exécuter `C:\Orange Digital Center\deploy-backend-production.ps1` en
-administrateur. Le script prépare une release et un environnement Python
+exécuter cette seule commande dans PowerShell administrateur :
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Orange Digital Center\deploy-backend-production.ps1"
+```
+
+Le script prépare une release et un environnement Python
 séparés, conserve les uploads, valide le service candidat, puis bascule IIS.
 Il alterne entre `ODC-PROD-API` et `ODC-PROD-API-SECONDARY`.
 
-Si une mise à jour concerne le worker email, utiliser ensuite
-`register-production-email-worker.ps1`. Il lit désormais la release NSSM
-publiée plutôt que la tâche API historique.
+Le worker email est automatiquement aligné et redémarré sur la release publiée.
+Les nouveaux workers terminent leur travail courant lorsqu'un arrêt est demandé.
+Une grâce de 60 secondes est prévue avant l'arrêt d'un ancien processus vérifié.
+Si une interruption survient pendant un envoi, la file peut retenter un travail
+après expiration de son verrou ; la livraison n'est pas garantie exactement une fois.
+L'ancienne API dispose d'un drainage borné à 120 secondes avant arrêt du service
+non publié. Une connexion encore active après ce délai peut être interrompue.
+
+Après réussite, le nettoyage conserve la release active et la précédente de
+chaque composant, trois configurations de déploiement et trois configurations
+de watchdog. Trois configurations de tentatives incomplètes sont également
+conservées pour le diagnostic. Les releases gérées d'essais échoués et non
+référencées sont retirées au prochain nettoyage après réussite.
+Un service, une tâche (même désactivée), un processus ou une jonction
+encore référent empêche la suppression. Les dossiers historiques non gérés et
+les anciennes sauvegardes de données ne sont pas effacés automatiquement.
+Les scripts complets sont suivis dans `ops/deployment/Deploy-*Production.ps1` ;
+les deux commandes à la racine du workspace sont de petits lanceurs.
+
+Une tâche `ODC-PROD-DATA-BACKUP` effectue séparément une sauvegarde locale à
+02:30 UTC chaque jour et conserve sept copies réussies (plus deux tentatives
+incomplètes au maximum). Elle inclut MongoDB,
+les uploads canoniques et le fichier privé de configuration de l'API. Les copies
+sont dans `archives/donnees-quotidiennes`, accessibles uniquement à SYSTEM et
+aux administrateurs. L'export MongoDB est un dump logique en ligne sans oplog,
+pas un instantané transactionnel global. Les CRC gzip/ZIP et les SHA-256 sont
+vérifiés/enregistrés ; un véritable exercice de restauration reste distinct.
+Les sauvegardes partagent le disque du serveur : aucune copie hors serveur
+n'est configurée tant qu'une destination externe n'a pas été fournie.
+
+Pour contrôler cette automatisation :
+
+```powershell
+Get-ScheduledTaskInfo -TaskName ODC-PROD-DATA-BACKUP |
+    Select-Object LastRunTime, LastTaskResult, NextRunTime
+```
+
+Le résultat attendu après exécution est `0`. La sauvegarde et les déploiements
+partagent un verrou ; une sauvegarde différée retente après 15 minutes.
 
 ## Migration et retour arrière
 
