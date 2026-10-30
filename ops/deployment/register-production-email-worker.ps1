@@ -31,6 +31,19 @@ $backend = $backendMatch.Groups[1].Value
 $python = Join-Path $backend '.venv\Scripts\python.exe'
 $worker = Join-Path $backend 'email_worker.py'
 $envFile = Join-Path $backend '.env.production'
+# Once IIS publishes an NSSM service, its release and explicit environment are
+# authoritative; the disabled historical task is retained only for rollback.
+$serviceHelper = Join-Path $PSScriptRoot 'BackendService.Common.ps1'
+if ((Get-Service -Name 'ODC-PROD-API','ODC-PROD-API-SECONDARY' -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath $serviceHelper -PathType Leaf)) { throw 'Helper API NSSM introuvable.' }
+    . $serviceHelper
+    $published = Get-PublishedBackendNssmContext
+    $backend = $published.Backend
+    $python = $published.Python
+    $worker = Join-Path $backend 'email_worker.py'
+    $envFile = $published.EnvFile
+    $releaseRoot = Split-Path -Parent $backend
+}
 foreach ($path in @($python, $worker, $envFile)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Fichier nécessaire introuvable: $path"

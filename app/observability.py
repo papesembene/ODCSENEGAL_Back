@@ -115,7 +115,7 @@ def configure_observability(app):
     log_dir = os.getenv("LOG_DIR", "logs")
     logger = _configure_logging(log_dir)
     apm_enabled = _configure_apm(app, logger)
-    ignored_paths = {"/health", "/metrics", "/favicon.ico"}
+    ignored_paths = {"/health", "/api/health", "/metrics", "/favicon.ico"}
 
     @app.before_request
     def start_request_trace():
@@ -168,6 +168,7 @@ def configure_observability(app):
         return response
 
     @app.route("/health", methods=["GET"])
+    @app.route("/api/health", methods=["GET"])
     def health_check():
         mongo_status = _mongo_status()
         dependencies = {"mongodb": mongo_status}

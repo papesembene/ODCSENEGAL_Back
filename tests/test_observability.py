@@ -7,6 +7,31 @@ from app.observability import configure_observability
 
 
 class ObservabilityTest(unittest.TestCase):
+    def test_portal_health_alias_reports_dependency_failures(self):
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        configure_observability(app)
+        with patch.dict("os.environ", {"REDIS_URL": ""}), patch(
+            "app.observability._mongo_status", return_value={"status": "down"},
+        ):
+            for path in ("/health", "/api/health"):
+                with self.subTest(path=path):
+                    response = app.test_client().get(path)
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(response.get_json()["status"], "degraded")
+                    self.assertEqual(response.get_json()["dependencies"]["mongodb"]["status"], "down")
+
+    def test_portal_health_alias_is_available(self):
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        configure_observability(app)
+        with patch.dict("os.environ", {"REDIS_URL": ""}), patch(
+            "app.observability._mongo_status", return_value={"status": "up"},
+        ):
+            response = app.test_client().get("/api/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "healthy")
+
     def test_health_and_request_headers(self):
         app = Flask(__name__)
         app.config["TESTING"] = True
