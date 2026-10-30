@@ -25,7 +25,8 @@ logger = configure_observability(app)
 
 
 def run_server():
-    host = os.getenv("HOST", "0.0.0.0")
+    # Containers must listen on their interface; Windows NSSM sets HOST=127.0.0.1.
+    host = os.getenv("HOST", "0.0.0.0")  # nosec B104
     port = int(os.getenv("PORT", "5000"))
     threads = int(os.getenv("WAITRESS_THREADS", "8"))
     timeout = int(os.getenv("WAITRESS_CHANNEL_TIMEOUT", "120"))

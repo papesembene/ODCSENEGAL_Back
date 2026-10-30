@@ -167,3 +167,51 @@ En cas d'incident, revenir a l'ancien routage selon le plan valide. Les donnees
 recues entre-temps dans la nouvelle base ne se retrouvent pas automatiquement
 dans l'ancienne: prevoir leur reconciliation. Ne pas supprimer les volumes,
 la nouvelle base ou les anciens services pour revenir en arriere.
+
+## Controles de securite du backend
+
+Le workflow `.github/workflows/security.yml` execute deux controles independants
+a chaque push et pull request, chaque lundi a 07:15 UTC et sur lancement manuel :
+
+- `Python dependency vulnerabilities` : pip-audit 2.10.1 analyse `requirements.txt`
+  et les dependances transitives. Toute vulnerabilite connue signalee ou erreur
+  d'execution fait echouer ce controle. Aucune vulnerabilite n'est ignoree.
+- `Python code security` : Bandit 1.9.4 analyse `app`, `run.py`, `email_worker.py`
+  et `preflight.py`. Les alertes de gravite moyenne ou elevee et de confiance
+  moyenne ou elevee font echouer le controle. Les alertes faibles ne bloquent pas.
+
+Les outils s'installent dans un environnement separe de celui de l'application.
+Les rapports JSON sont disponibles dans les artefacts du lancement GitHub pendant
+14 jours, y compris si l'analyse echoue. Si l'installation ou le reseau echoue
+avant la creation d'un rapport, consulter le journal de l'etape en echec.
+Ces jobs n'utilisent ni MongoDB, ni les secrets ou services de production.
+pip-audit interroge les avis publics avec les noms et versions des paquets.
+
+Un statut rouge rend le controle GitHub en echec ; il ne bloque les fusions que
+si les regles de protection de branche exigent ces controles. Il ne bloque pas
+automatiquement les scripts de deploiement manuel.
+
+L'unique exception Bandit ajoutee est `B104` sur le listener de `run.py` :
+le conteneur doit ecouter sur son interface, tandis que les services Windows
+fixent explicitement `HOST=127.0.0.1`. Cette exception ne desactive pas la regle
+dans les autres fichiers. Les outils ne remplacent pas une revue des droits,
+des secrets, de la configuration serveur ou un test d'intrusion.
+
+### Corrections de dependances du 30 octobre 2026
+
+- dnspython 2.7.0 vers 2.9.0 : correction de la consommation CPU lors du decodage
+  DNS, [avis de l'editeur](https://github.com/rthalley/dnspython/security/advisories/GHSA-45c3-73f7-pv4m).
+- PyMongo 4.18.2 vers 4.18.3 : correction du decodage BSON de certaines expressions
+  regulieres malformees, [avis MongoDB](https://github.com/mongodb/mongo-python-driver/security/advisories/GHSA-98qm-wvgf-w4cf).
+- setuptools 83.0.0 vers 84.1.0 : correction d'une sortie de chemin lors d'une
+  installation legacy sous Windows, [avis de l'editeur](https://github.com/pypa/setuptools/security/advisories/GHSA-xmj3-9gf7-h52w).
+
+L'audit local des dependances corrigees a resolu 42 paquets sans vulnerabilite
+connue signalee. Le resultat depend des avis disponibles au moment du controle.
+Validation dans un environnement temporaire avec ces versions : `pip check` OK,
+153 tests reussis avec MongoDB local et 15 ignores (services optionnels absents).
+L'environnement Python actif n'a pas ete modifie : ces mises a jour doivent
+etre deployees apres validation GitHub pour etre appliquees a la production.
+
+References : [pip-audit](https://github.com/pypa/pip-audit),
+[Bandit et ses seuils](https://bandit.readthedocs.io/en/latest/man/bandit.html).

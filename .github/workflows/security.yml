@@ -1,0 +1,68 @@
+name: Backend security
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 7 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Python dependency vulnerabilities
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependency auditor in a separate environment
+        run: |
+          python -m venv .security-venv
+          .security-venv/bin/python -m pip install --disable-pip-version-check pip-audit==2.10.1
+      - name: Audit application dependencies including transitive packages
+        run: |
+          mkdir -p security-reports
+          .security-venv/bin/python -m pip_audit -r requirements.txt --progress-spinner off -f json -o security-reports/dependencies.json
+      - name: Save dependency report even when the audit fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-report
+          path: security-reports/dependencies.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  static-analysis:
+    name: Python code security
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install static analyzer in a separate environment
+        run: |
+          python -m venv .security-venv
+          .security-venv/bin/python -m pip install --disable-pip-version-check bandit==1.9.4
+      - name: Check medium and high severity issues with medium or high confidence
+        run: |
+          mkdir -p security-reports
+          .security-venv/bin/python -m bandit -r app run.py email_worker.py preflight.py -ll -ii -f json -o security-reports/bandit.json
+      - name: Save code report even when the scan fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-security-report
+          path: security-reports/bandit.json
+          if-no-files-found: warn
+          retention-days: 14
