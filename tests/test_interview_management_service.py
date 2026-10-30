@@ -1,6 +1,7 @@
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.services.interviews.exceptions import (
     InterviewConflictError,
@@ -164,7 +165,11 @@ class InterviewManagementServiceTest(unittest.TestCase):
                 },
             )
 
-    def test_create_slot_keeps_filter_and_legacy_jury_in_sync(self):
+    @patch("app.services.interviews.management_service.User")
+    def test_create_slot_keeps_filter_and_legacy_jury_in_sync(self, user_model):
+        user_model.objects.return_value.only.return_value = [
+            SimpleNamespace(id="jury-1", profile_data={"admin_scope": "interview_member"}),
+        ]
         slot = self.service.create_slot({
             "campaign_id": "campaign-id",
             "label": " Matin ",

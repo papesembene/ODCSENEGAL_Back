@@ -94,7 +94,7 @@ class TestEmailServiceTest(unittest.TestCase):
     def test_bulk_result_tracks_failed_addresses(self):
         client = Mock()
         service = TestEmailService(client=client)
-        service.sendgrid_api_key = "configured"
+        service.delivery = Mock(is_configured=True)
         service.send_test_invitation = Mock(side_effect=[True, False])
         candidates = [
             SimpleNamespace(

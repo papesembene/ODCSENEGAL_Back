@@ -45,18 +45,15 @@ class CandidatureQueriesIntegrationTest(unittest.TestCase):
     def setUpClass(cls):
         cls.name = "odc_candidate_queries_" + uuid4().hex
         cls.recorder = QueryRecorder()
+        cls.addClassCleanup(disconnect)
         cls.client = connect(cls.name, host="mongodb://127.0.0.1:27027", serverSelectionTimeoutMS=3000,
                              event_listeners=[cls.recorder])
         cls.client.admin.command("ping")
+        cls.addClassCleanup(cls.client.drop_database, cls.name)
         cls.repository = CandidatureReadRepository()
         app = Flask(__name__)
         app.register_blueprint(candidature_bp, url_prefix="/api/admin")
         cls.http = app.test_client()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.client.drop_database(cls.name)
-        disconnect()
 
     def setUp(self):
         Candidature.drop_collection()

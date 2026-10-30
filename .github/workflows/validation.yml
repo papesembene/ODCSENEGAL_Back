@@ -9,9 +9,20 @@ jobs:
       mongo:
         image: mongo:8.0
         ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
       redis:
         image: redis:7.4-alpine
         ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

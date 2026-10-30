@@ -22,13 +22,10 @@ class InterviewAccessIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.db_name = "odc_interview_access_test_" + uuid4().hex
+        cls.addClassCleanup(disconnect)
         cls.connection = connect(cls.db_name, host="mongodb://127.0.0.1:27017", serverSelectionTimeoutMS=3000)
         cls.connection.admin.command("ping")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.connection.drop_database(cls.db_name)
-        disconnect()
+        cls.addClassCleanup(cls.connection.drop_database, cls.db_name)
 
     def setUp(self):
         InterviewEvaluation.drop_collection()

@@ -42,14 +42,11 @@ class FactoryCompatibilityIntegrationTest(unittest.TestCase):
                 "connect": False, "serverSelectionTimeoutMS": 3000,
             }
 
+        cls.addClassCleanup(disconnect)
         cls.app = create_app(LocalTestConfig)
         cls.connection = get_connection()
         cls.connection.admin.command("ping")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.connection.drop_database(cls.db_name)
-        disconnect()
+        cls.addClassCleanup(cls.connection.drop_database, cls.db_name)
 
     def setUp(self):
         User.drop_collection()

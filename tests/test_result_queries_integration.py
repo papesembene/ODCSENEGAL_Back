@@ -37,14 +37,11 @@ class ResultQueriesIntegrationTest(unittest.TestCase):
     def setUpClass(cls):
         cls.name = "odc_result_query_test_" + uuid4().hex
         cls.recorder = QueryRecorder()
+        cls.addClassCleanup(disconnect)
         cls.client = connect(cls.name, host="mongodb://127.0.0.1:27017", serverSelectionTimeoutMS=3000,
                              event_listeners=[cls.recorder])
         cls.client.admin.command("ping")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.client.drop_database(cls.name)
-        disconnect()
+        cls.addClassCleanup(cls.client.drop_database, cls.name)
 
     def setUp(self):
         for model in (Test, TestResult, TestViolation):
