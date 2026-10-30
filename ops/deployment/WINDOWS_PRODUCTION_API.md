@@ -61,7 +61,9 @@ uniquement les cibles des deux règles API sur 5002, en préservant les autres
 réglages IIS. Vérifier les deux accès publics avant d'arrêter le service retiré.
 Le watchdog NSSM doit être désactivé lors de ce retour à la tâche historique.
 
-Les anciens guides de configuration et résultats de charge ont été déplacés
-dans `C:\Orange Digital Center\_documents_archives_20261030`. L'historique Git
-conserve leurs anciennes versions. Les instructions historiques qui décrivent
-une API encore publiée par tâche Windows sont dépassées par ce document.
+Les guides historiques décrivant une API publiée par tâche Windows, les anciennes
+commandes annuelles et le bilan de charge de juin ont été retirés du workspace
+car ils ne décrivent plus le fonctionnement actuel. L'historique Git conserve
+les documents qui étaient suivis. Le schéma MongoDB, la checklist de vérification
+et la roadmap restent dans `C:\Orange Digital Center\_documents_archives_20261030`.
+Ce document est la référence pour l'exploitation de l'API NSSM.
