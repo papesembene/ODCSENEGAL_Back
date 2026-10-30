@@ -1,5 +1,54 @@
 # Tests de charge locaux
 
+## Inscriptions : scénario Windows autonome et isolé
+
+`registration_load.py` démarre son propre MongoDB et sa propre API Waitress,
+sur deux ports loopback libres et dans un dossier temporaire. Il ne propose
+aucune cible distante et n'utilise aucun fichier `.env` du projet. Les secrets,
+les paramètres email, Redis, APM et proxy du processus appelant ne sont pas
+transmis à l'API de test. Il faut fournir un exécutable `mongod` déjà installé.
+
+Depuis le backend, dans PowerShell :
+
+```powershell
+.\.venv\Scripts\python.exe load_tests/registration_load.py `
+  --mongod 'C:\chemin\vers\mongod.exe' `
+  --levels 10,25,50 --count 2000 `
+  --output load_tests/reports/inscriptions.json
+```
+
+Chaque parcours lit l'ouverture de campagne, vérifie l'unicité de l'email,
+puis soumet une nouvelle candidature fictive. Les index sont préchauffés
+par un parcours avant la mesure. La concurrence est le nombre de parcours
+en cours, pas un nombre d'inscriptions par seconde. Chaque palier traite
+`--count` nouveaux candidats ; le maximum est 100 parcours simultanés et
+2 000 candidats par palier. Les valeurs par défaut sont 8 threads Waitress
+et un pool MongoDB maximal de 50 connexions.
+
+Le rapport JSON contient les p50/p95/p99 par endpoint, les codes HTTP,
+les erreurs, le débit des parcours et des échantillons CPU/RSS toutes les
+250 ms. Le CPU d'un processus peut dépasser 100 % lorsqu'il utilise plusieurs
+cœurs. Le RSS additionne les processus enfants, sans déduire les pages partagées.
+Le script vérifie aussi le nombre de candidatures et de confirmations en file.
+
+Aucun worker email n'est démarré et aucune livraison d'email n'est mesurée.
+À la fin, les processus créés et leurs enfants sont arrêtés, puis le répertoire
+temporaire contenant la base et les sessions est supprimé. Les rapports restent
+dans `load_tests/reports` (ignorés par Git). En cas d'échec, un journal des
+processus de test est conservé à côté du rapport.
+
+Le scénario arrête les paliers suivants si une requête échoue, si les compteurs
+divergent, si le p95 des soumissions dépasse `--max-p95-ms` (1 500 ms par défaut),
+ou si un échantillon de CPU global dépasse 85 %. Ces seuils sont des critères
+d'arrêt de cette mesure exploratoire, pas une garantie de capacité.
+
+Cette mesure locale ne couvre pas IIS, TLS, le frontend, le réseau des candidats,
+les envois effectifs d'emails, Redis, une grosse base historique ou une charge
+soutenue pendant des heures. Le générateur, l'API et MongoDB partagent la même
+machine : le débit ne constitue donc pas une capacité garantie de production.
+
+La commande n'exige aucune modification ni aucun redéploiement du backend publié.
+
 Ces scénarios permettent de tester progressivement le backend sans attendre
 la production. Le scénario historique cible uniquement des lectures publiques.
 Le scénario `online_test_locustfile.py` cible le parcours critique des tests
