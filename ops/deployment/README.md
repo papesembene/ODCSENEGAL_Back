@@ -51,6 +51,17 @@ candidats doivent donc etre verifies avant de changer cette valeur en production
 Creer/configurer les index et valider le parcours complet en preproduction avant
 la bascule. Ne pas activer cette option sur le site public sans cette recette.
 
+`STARTUP_COLLECTION` applique la meme separation aux dossiers Startup Lab et
+aux statistiques startups. Pour la campagne 2026, utiliser `startups_2026`;
+la valeur par defaut `startup` conserve le comportement historique. Les listes,
+exports, controles de doublons et nouvelles inscriptions utilisent uniquement
+la collection choisie. Les anciens dossiers ne sont ni deplaces ni supprimes.
+Un ancien candidat startup peut donc se reinscrire pour la nouvelle campagne.
+Definir ensemble `ODC_CAMPAIGN_YEAR=2026`,
+`CANDIDATURE_COLLECTION=candidatures_2026` et `STARTUP_COLLECTION=startups_2026`
+dans le fichier prive effectivement charge par l'API, puis redemarrer l'API.
+Ces valeurs sont lues au demarrage; le frontend ne necessite aucun changement.
+
 Choisir explicitement `EMAIL_PROVIDER=brevo`, `brevo_smtp`, `sendgrid` ou `smtp`.
 Pour le relais de l'ancienne version, recuperer uniquement sa configuration email
 autorisee: serveur, port, TLS/SSL, expediteur et identifiants. Avec Brevo HTTP,

@@ -1,11 +1,13 @@
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from werkzeug.exceptions import ServiceUnavailable
 
 from app.config import Config
-from app.runtime_config import env_int
+from app.runtime_config import env_int, load_runtime_environment
 from app.utils.shared_rate_limit import shared_rate_limited
 
 
@@ -14,6 +16,22 @@ class ProductionRuntimeTest(unittest.TestCase):
         self.environment = patch.dict(os.environ, {}, clear=True)
         self.environment.start()
         self.addCleanup(self.environment.stop)
+
+    def test_explicit_env_handles_windows_bom_and_preserves_service_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "production.env"
+            path.write_text("FLASK_ENV=production\nPORT=5001\n", encoding="utf-8-sig")
+            with patch.dict(os.environ, {"ODC_ENV_FILE": str(path), "PORT": "5002"}):
+                load_runtime_environment()
+                self.assertEqual(os.environ["FLASK_ENV"], "production")
+                self.assertEqual(os.environ["PORT"], "5002")
+                self.assertNotIn("SENDGRID_API_KEY", os.environ)
+
+    def test_missing_explicit_env_refuses_development_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"ODC_ENV_FILE": str(Path(directory) / "missing.env")}):
+                with self.assertRaisesRegex(RuntimeError, "ODC_ENV_FILE"):
+                    load_runtime_environment()
 
     def test_integer_settings_reject_invalid_budgets(self):
         for value in ("0", "-1", "1000000", "text"):

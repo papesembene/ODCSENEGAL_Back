@@ -1,5 +1,11 @@
 from mongoengine import Document, StringField, DateTimeField, BooleanField
 from datetime import datetime
+import os
+
+# Select a campaign explicitly; keep historical data in its original collection.
+STARTUP_COLLECTION = os.getenv("STARTUP_COLLECTION", "startup").strip()
+if not STARTUP_COLLECTION:
+    raise RuntimeError("STARTUP_COLLECTION ne doit pas etre vide")
 
 class Startup(Document):
     # Informations personnelles
@@ -57,6 +63,7 @@ class Startup(Document):
     createdAt = DateTimeField(default=datetime.utcnow)
 
     meta = {
+        'collection': STARTUP_COLLECTION,
         'strict': False  # Ignorer les champs supplémentaires présents en base mais non définis ici
     }
     

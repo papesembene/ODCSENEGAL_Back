@@ -1,6 +1,19 @@
 """Validated environment settings shared by API and worker processes."""
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+def load_runtime_environment():
+    """Load one env file, preserving settings supplied by the service."""
+    explicit = os.getenv("ODC_ENV_FILE")
+    path = Path(explicit) if explicit else Path(__file__).resolve().parents[1] / ".env"
+    if explicit and not path.is_file():
+        raise RuntimeError("ODC_ENV_FILE introuvable: demarrage refuse")
+    # Windows editors may save UTF-8 files with a BOM.
+    load_dotenv(path, override=False, encoding="utf-8-sig")
 
 
 def env_int(name, default, minimum=1, maximum=100000):

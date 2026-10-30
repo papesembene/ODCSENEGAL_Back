@@ -1,10 +1,10 @@
 # odcdeploye\backend\app\__init__.py
 import os
-from dotenv import load_dotenv
+from app.runtime_config import load_runtime_environment
 
 # Allow Windows services to use a private production env file while keeping the
 # development .env untouched. Existing process environment variables win.
-load_dotenv(os.getenv("ODC_ENV_FILE") or None, override=False)
+load_runtime_environment()
 
 from flask import Flask
 from flask_cors import CORS
@@ -39,8 +39,6 @@ def add_security_headers(response):
     return response
  
 def create_app(config_class=Config):
-    load_dotenv()
- 
     app = Flask(__name__)
    
     app.config.from_object(config_class)

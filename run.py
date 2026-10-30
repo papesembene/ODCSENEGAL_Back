@@ -4,7 +4,6 @@ import logging
 import os
 import socket
 
-from dotenv import load_dotenv
 from waitress import serve
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -12,7 +11,6 @@ from app import create_app
 from app.observability import configure_observability
 
 
-load_dotenv(os.getenv("ODC_ENV_FILE") or None, override=False)
 app = create_app()
 
 if os.getenv("TRUST_PROXY_HEADERS", "true").lower() == "true":

@@ -1,11 +1,8 @@
 # config.py
-from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 from app.runtime_config import env_int
 from urllib.parse import urlsplit
-
-load_dotenv()
 
 class Config:
     ENVIRONMENT = os.getenv("FLASK_ENV", "development")
