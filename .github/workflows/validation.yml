@@ -5,8 +5,9 @@ permissions:
 jobs:
   tests:
     # MongoDB 8.0 refuses kernels >= 6.19 (SERVER-121912).
-    # Pin the runner while ubuntu-latest migrates to Ubuntu 26.04.
-    runs-on: ubuntu-24.04
+    # Ubuntu 24.04 runners also use kernel 7.0; 22.04 currently uses 6.8.
+    # Temporary compatibility workaround; track runner-images and SERVER-121912.
+    runs-on: ubuntu-22.04
     services:
       mongo:
         image: mongo:8.0
