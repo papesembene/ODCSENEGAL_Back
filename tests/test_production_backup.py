@@ -31,7 +31,7 @@ class ProductionBackupTest(unittest.TestCase):
             self.assertEqual(len(list(destination.iterdir())),3)
             self.assertEqual(list(destination.rglob('mongodump-private.yml')),[])
 
-    def test_retention_preserves_seven_successes_and_two_incomplete_copies(self):
+    def test_retention_preserves_latest_success_and_two_incomplete_copies(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
             completed=[]
@@ -48,7 +48,7 @@ class ProductionBackupTest(unittest.TestCase):
             legacy=root/'production-20261022.archive.gz'
             legacy.write_bytes(b'legacy')
             backup.prune(root)
-            self.assertEqual([p.exists() for p in completed],[False]*3+[True]*7)
+            self.assertEqual([p.exists() for p in completed],[False]*9+[True])
             self.assertEqual([p.exists() for p in partial],[False,True,True])
             self.assertTrue(legacy.exists())
 

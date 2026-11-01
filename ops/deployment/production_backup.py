@@ -23,7 +23,7 @@ def remove_backup(path, root):
     shutil.rmtree(path)
 
 
-def prune(root, keep=7):
+def prune(root, keep=1):
     completed = []
     partial = []
     for directory in root.iterdir():
