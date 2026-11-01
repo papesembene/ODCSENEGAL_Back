@@ -3,6 +3,8 @@
 from datetime import datetime
 import os
 import re
+from uuid import uuid4
+from app.utils.upload_security import validate_upload
 
 from werkzeug.utils import secure_filename
 
@@ -78,24 +80,28 @@ def validate_creation_date(value):
         )
 
 
-def validate_document(file, missing_message, size_message):
+def validate_document(file, missing_message, size_message, max_bytes=MAX_FILE_SIZE):
     if not file or not getattr(file, "filename", ""):
         raise ApplicationValidationError(missing_message)
     file.seek(0, os.SEEK_END)
     size = file.tell()
     file.seek(0)
-    if size > MAX_FILE_SIZE:
+    if size > max_bytes:
         raise ApplicationValidationError(size_message)
     extension = os.path.splitext(file.filename)[1].lower().lstrip(".")
     if extension not in ALLOWED_DOCUMENT_EXTENSIONS:
         raise ApplicationValidationError(
             "Format de fichier non autorisé"
         )
+    try:
+        validate_upload(file, ALLOWED_DOCUMENT_EXTENSIONS, max_bytes)
+    except ValueError as error:
+        raise ApplicationValidationError(str(error)) from error
 
 
 def save_document(file, upload_folder, timestamp):
     os.makedirs(upload_folder, exist_ok=True)
-    filename = f"{timestamp}_{secure_filename(file.filename)}"
+    filename = f"{timestamp}_{uuid4().hex}_{secure_filename(file.filename)}"
     path = os.path.join(upload_folder, filename)
     file.save(path)
     return path

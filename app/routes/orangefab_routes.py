@@ -9,7 +9,7 @@ from app.services.applications import (
     OrangeFabApplicationService,
 )
 from app.services.email_service import EmailService
-from app.utils.request_guards import normalize_email, normalize_phone
+from app.utils.request_guards import normalize_email, normalize_phone, is_request_rate_limited
 
 
 orangefab_bp = Blueprint("orangefab", __name__)
@@ -35,6 +35,8 @@ def _send_notifications(application):
 
 @orangefab_bp.route("/check-email", methods=["GET"])
 def check_email():
+    if is_request_rate_limited("orangefab_check_ip", request.remote_addr, limit=60, window=60):
+        return jsonify(error="Trop de vérifications"), 429
     email = normalize_email(request.args.get("email"))
     if not email:
         return jsonify({"error": "Email requis"}), 400
@@ -46,6 +48,8 @@ def check_email():
 
 @orangefab_bp.route("/check-phone", methods=["GET"])
 def check_phone():
+    if is_request_rate_limited("orangefab_check_ip", request.remote_addr, limit=60, window=60):
+        return jsonify(error="Trop de vérifications"), 429
     phone = normalize_phone(request.args.get("phone"))
     if not phone:
         return jsonify({"error": "Téléphone requis"}), 400
@@ -57,6 +61,8 @@ def check_phone():
 
 @orangefab_bp.route("/", methods=["POST"])
 def submit_application():
+    if is_request_rate_limited("orangefab_submit_ip", request.remote_addr, limit=30, window=300):
+        return jsonify(error="Trop de tentatives"), 429
     try:
         application = _service().submit(request.form, request.files)
         _send_notifications(application)

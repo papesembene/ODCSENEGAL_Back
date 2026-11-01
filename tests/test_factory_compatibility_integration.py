@@ -51,7 +51,7 @@ class FactoryCompatibilityIntegrationTest(unittest.TestCase):
     def setUp(self):
         User.drop_collection()
         self.user = User(
-            email="admin@example.org", first_name="Test", last_name="Admin",
+            email="admin-" + uuid4().hex + "@example.org", first_name="Test", last_name="Admin",
             profile_type="student", is_admin=True, admin_type="super_admin",
             password_hash=generate_password_hash("Test-password-only", method="pbkdf2:sha256:600000"),
         ).save()
@@ -104,6 +104,16 @@ class FactoryCompatibilityIntegrationTest(unittest.TestCase):
         self.user.save()
         self.assertTrue(self.user.reload().check_password("Another-test-password"))
         self.assertFalse(self.user.check_password("incorrect"))
+
+    def test_deactivated_user_cannot_reuse_a_jwt_on_profile_or_catalog_routes(self):
+        token=self.login().json['token']
+        self.user.is_active=False
+        self.user.save()
+        headers={'Authorization':'Bearer '+token}
+        for path in ('/api/auth/get-profile','/api/competences/'):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path,headers=headers).status_code,401)
+        self.assertEqual(self.client.post('/api/auth/update-profile',headers=headers,data={}).status_code,401)
 
     def test_interview_member_cannot_retry_test_invitations(self):
         self.user.admin_type = "competences"

@@ -1,8 +1,9 @@
 import secrets
 import string
 
-from flask import Blueprint, jsonify, request
-from werkzeug.exceptions import BadRequest, Unauthorized
+from flask import Blueprint, jsonify, request, current_app
+from werkzeug.exceptions import BadRequest, Unauthorized, TooManyRequests
+from app.utils.request_guards import login_credentials
 from werkzeug.security import generate_password_hash
 
 from app.services.admin import (
@@ -144,8 +145,7 @@ def admin_login():
         data = request.get_json(silent=True)
         if not data:
             raise BadRequest("Données manquantes")
-        email = data.get("email")
-        password = data.get("password")
+        email, password = login_credentials(data)
         if not email or not password:
             raise BadRequest("Email et mot de passe requis")
 
@@ -169,11 +169,14 @@ def admin_login():
         return jsonify(
             {"success": False, "error": str(error)}
         ), 400
+    except TooManyRequests as error:
+        return jsonify(success=False, error=error.description), 429
     except Exception as error:
+        current_app.logger.exception("Echec de connexion administrateur")
         return jsonify(
             {
                 "success": False,
-                "error": f"Erreur lors de la connexion: {error}",
+                "error": "Erreur interne du serveur",
             }
         ), 500
 

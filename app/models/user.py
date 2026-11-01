@@ -18,6 +18,7 @@ class FileField(db.EmbeddedDocument):
     def to_json(self):
         return {
             "filename": self.filename,
+            "path": self.path.replace('\\', '/'),
             "url": self.get_url(),
             "content_type": self.content_type,
             "size": self.size,

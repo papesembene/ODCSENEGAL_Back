@@ -228,7 +228,7 @@ class CandidatureService:
             raise CandidatureServiceError(str(error), 400) from error
 
     def _validate_submission(self, data):
-        if not data:
+        if not isinstance(data, dict) or not data:
             raise CandidatureServiceError("Données manquantes")
         for field in self.REQUIRED_FIELDS:
             if field not in data:
@@ -244,6 +244,8 @@ class CandidatureService:
                 raise CandidatureServiceError(
                     f"Le champ {field} est requis",
                 )
+            elif not isinstance(data[field], str) or len(data[field]) > 4096:
+                raise CandidatureServiceError(f"Le champ {field} doit être un texte valide")
 
     @staticmethod
     def _status_counts(query):

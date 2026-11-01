@@ -13,6 +13,8 @@ from app.models.user import (
     StudentProfile,
 )
 from app.repositories.user_repository import UserRepository
+from app.utils.upload_security import DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, validate_upload
+from email_validator import validate_email, EmailNotValidError
 
 
 class ProfileValidationError(ValueError):
@@ -86,20 +88,25 @@ class ProfileService:
         self.repository = repository or UserRepository()
 
     def register(self, data, files, upload_folder):
-        data = data or {}
+        if not isinstance(data, dict):
+            raise ProfileValidationError("Objet de profil invalide")
         required_fields = ("email", "password", "profileType")
         if not all(field in data for field in required_fields):
             raise ProfileValidationError(
                 "Email, mot de passe et type de profil requis"
             )
-        if self.repository.find_by_email(data["email"]):
-            raise ProfileValidationError(
-                "Un utilisateur avec cet email existe déjà"
-            )
-
         profile_type = data["profileType"]
-        if profile_type not in self.PROFILE_DEFINITIONS:
+        if not isinstance(profile_type, str) or profile_type not in self.PROFILE_DEFINITIONS:
             raise ProfileValidationError("Type de profil invalide")
+        password = data.get("password")
+        if not isinstance(password, str) or not 8 <= len(password) <= 1024:
+            raise ProfileValidationError("Le mot de passe doit contenir entre 8 et 1024 caractères")
+        try:
+            data["email"] = validate_email(data["email"], check_deliverability=False).normalized.lower()
+        except (EmailNotValidError, TypeError, AttributeError) as error:
+            raise ProfileValidationError("Email invalide") from error
+        if self.repository.find_by_email(data["email"]):
+            raise ProfileValidationError("Un utilisateur avec cet email existe déjà")
 
         user = self.repository.create(
             email=data["email"],
@@ -200,6 +207,11 @@ class ProfileService:
 
     @staticmethod
     def _save_file(file, upload_folder, subfolder):
+        allowed = IMAGE_EXTENSIONS if subfolder == "startups/logos" else DOCUMENT_EXTENSIONS
+        try:
+            validate_upload(file, allowed, 10 * 1024 * 1024)
+        except ValueError as error:
+            raise ProfileValidationError(str(error)) from error
         filename = secure_filename(file.filename)
         unique_name = f"{uuid4().hex}_{filename}"
         folder_path = os.path.join(upload_folder, subfolder)
@@ -211,6 +223,16 @@ class ProfileService:
             "path": os.path.join(subfolder, unique_name),
             "content_type": file.content_type,
             "size": os.path.getsize(save_path),
+        }
+
+    def document_paths(self, user):
+        profile = self._get_profile(user)
+        if not profile:
+            return set()
+        return {
+            value.path.replace("\\", "/")
+            for name in profile._fields
+            if isinstance((value := getattr(profile, name, None)), FileField)
         }
 
     def _get_profile(self, user):

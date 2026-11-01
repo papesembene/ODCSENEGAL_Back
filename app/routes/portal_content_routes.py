@@ -10,6 +10,7 @@ from app.services.portal_content_service import (
     PortalContentServiceError,
 )
 from app.utils.auth_decorators import admin_required
+from app.utils.upload_security import IMAGE_EXTENSIONS, validate_upload
 
 
 portal_content_bp = Blueprint("portal_content", __name__)
@@ -25,10 +26,10 @@ def _save_portal_image(file_storage):
     if not file_storage or not file_storage.filename:
         raise BadRequest("Image requise")
 
-    extension = file_storage.filename.rsplit(".", 1)[-1].lower()
-    allowed_extensions = {"png", "jpg", "jpeg", "gif", "webp"}
-    if extension not in allowed_extensions:
-        raise BadRequest("Format image invalide")
+    try:
+        validate_upload(file_storage, IMAGE_EXTENSIONS, 10 * 1024 * 1024)
+    except ValueError as error:
+        raise BadRequest(str(error)) from error
 
     filename = secure_filename(file_storage.filename)
     unique_filename = f"{uuid.uuid4().hex}_{filename}"

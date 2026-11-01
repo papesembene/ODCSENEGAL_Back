@@ -23,6 +23,18 @@ jwt = JWTManager()
 mail = Mail()
 email_service = EmailService()
 session = Session()
+
+@jwt.user_lookup_loader
+def lookup_active_jwt_user(_header, payload):
+    from app.models.user import User
+    from mongoengine.errors import ValidationError
+    identity = payload.get("sub")
+    if not isinstance(identity, str):
+        return None
+    try:
+        return User.objects(id=identity, is_active=True).first()
+    except ValidationError:
+        return None
  
 class CustomJSONProvider(DefaultJSONProvider):
     def default(self, obj):
@@ -35,13 +47,15 @@ def add_security_headers(response):
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Content-Security-Policy'] = "frame-ancestors 'none'"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return response
  
 def create_app(config_class=Config):
     app = Flask(__name__)
    
     app.config.from_object(config_class)
+    from app.utils.application_security import install_application_security
+    install_application_security(app)
     if hasattr(config_class, "validate"):
         config_class.validate()
     app.json = CustomJSONProvider(app)

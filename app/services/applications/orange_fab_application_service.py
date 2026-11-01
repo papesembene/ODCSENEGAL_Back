@@ -7,6 +7,7 @@ from app.services.applications.base_application_service import (
 
 
 class OrangeFabApplicationService(BaseApplicationService):
+    max_upload_bytes = 128 * 1024 * 1024
     required_fields = (
         "firstName",
         "lastName",

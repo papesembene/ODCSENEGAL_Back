@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
+from app.utils.auth_decorators import admin_required
 
 from app.models.job_offer import JobOffer
 from app.services.catalog_service import (
@@ -28,7 +29,7 @@ def get_all_job_offers():
 
 
 @job_offer_bp.route("/", methods=["POST"])
-@jwt_required()
+@admin_required({"competences", "startups", "super_admin"})
 def create_job_offer():
     try:
         job_offer = job_offer_service.create(request.get_json() or {})

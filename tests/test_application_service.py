@@ -1,4 +1,6 @@
 import unittest
+from io import BytesIO
+from werkzeug.datastructures import FileStorage
 from unittest.mock import Mock, patch
 
 from app.services.applications.application_helpers import (
@@ -61,10 +63,8 @@ class ApplicationServiceTest(unittest.TestCase):
         remove_files_mock,
     ):
         self.service.required_fields = ("email", "phone", "phoneCountry")
-        first_file = Mock(filename="cv.pdf")
-        second_file = Mock(filename="pitch.pdf")
-        first_file.tell.return_value = 1
-        second_file.tell.return_value = 1
+        first_file = FileStorage(stream=BytesIO(b"%PDF-1.7\nfixture"), filename="cv.pdf")
+        second_file = FileStorage(stream=BytesIO(b"%PDF-1.7\nfixture"), filename="pitch.pdf")
         save_document_mock.side_effect = [
             "/tmp/cv.pdf",
             RuntimeError("disk full"),

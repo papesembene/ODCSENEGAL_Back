@@ -27,6 +27,7 @@ class ApplicationPersistenceError(ApplicationValidationError):
 
 
 class BaseApplicationService:
+    max_upload_bytes = 10 * 1024 * 1024
     required_fields = ()
     cv_field = "cv"
     pitch_field = "pitch_deck"
@@ -62,12 +63,14 @@ class BaseApplicationService:
         validate_document(
             cv_file,
             "CV requis",
-            "Le CV est trop volumineux (max 250MB)",
+            f"Le CV est trop volumineux (max {self.max_upload_bytes // (1024 * 1024)}MB)",
+            max_bytes=self.max_upload_bytes,
         )
         validate_document(
             pitch_file,
             "Document de présentation requis",
-            "Le document de présentation est trop volumineux (max 250MB)",
+            f"Le document de présentation est trop volumineux (max {self.max_upload_bytes // (1024 * 1024)}MB)",
+            max_bytes=self.max_upload_bytes,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

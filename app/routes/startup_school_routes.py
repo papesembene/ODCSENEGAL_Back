@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
+from app.utils.auth_decorators import admin_required
 
 from app.models.startup_school import StartupSchool
 from app.services.catalog_service import (
@@ -28,7 +29,7 @@ def get_all_startup_schools():
 
 
 @startup_school_bp.route("/", methods=["POST"])
-@jwt_required()
+@admin_required({"startups", "super_admin"})
 def create_startup_school():
     try:
         startup_school = startup_school_service.create(

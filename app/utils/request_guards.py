@@ -3,6 +3,8 @@ import time
 from collections import defaultdict
 from threading import Lock
 from app.utils.shared_rate_limit import shared_rate_limited
+from flask import request
+from werkzeug.exceptions import BadRequest, TooManyRequests
 
 
 RATE_LIMIT_STORE = defaultdict(list)
@@ -16,6 +18,18 @@ def normalize_email(value):
 
 def normalize_phone(value):
     return re.sub(r"[^\d+]", "", (value or "").strip())
+
+
+def login_credentials(data):
+    if not isinstance(data, dict):
+        raise BadRequest("Email et mot de passe requis")
+    email, password = data.get("email"), data.get("password")
+    if not isinstance(email, str) or not isinstance(password, str) or not email.strip() or not password or len(email) > 254 or len(password) > 1024:
+        raise BadRequest("Identifiants invalides")
+    email = normalize_email(email)
+    if is_request_rate_limited("login_ip", request.remote_addr, limit=300, window=300) or is_request_rate_limited("login_account", email, limit=10, window=300):
+        raise TooManyRequests("Trop de tentatives de connexion, veuillez réessayer plus tard")
+    return email, password
 
 
 def is_request_rate_limited(scope, identifier, limit=10, window=60):

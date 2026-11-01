@@ -39,7 +39,7 @@ class ProfileServiceTest(unittest.TestCase):
         user = self.service.register(
             {
                 "email": "student@example.com",
-                "password": "secret",
+                "password": "Test-secret-123",
                 "profileType": "student",
                 "institution": "ODC",
                 "educationLevel": "Licence",

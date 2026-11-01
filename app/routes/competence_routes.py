@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
+from app.utils.auth_decorators import admin_required
 
 from app.models.competence import Competence
 from app.services.catalog_service import (
@@ -23,7 +24,7 @@ def get_all_competences():
 
 
 @competence_bp.route("/", methods=["POST"])
-@jwt_required()
+@admin_required({"competences", "super_admin"})
 def create_competence():
     try:
         competence = competence_service.create(request.get_json() or {})

@@ -1,14 +1,20 @@
 """OAuth provider clients with bounded network calls."""
 
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from flask import current_app, request, session
-from werkzeug.exceptions import BadRequest, InternalServerError
+from werkzeug.exceptions import BadRequest, InternalServerError, ServiceUnavailable
 
 
 REQUEST_TIMEOUT = (5, 15)
+
+
+def require_secure_callback(redirect_uri):
+    parsed = urlsplit(redirect_uri or "")
+    if current_app.config.get("ENVIRONMENT") == "production" and (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password):
+        raise ServiceUnavailable("Connexion externe indisponible : configuration HTTPS requise")
 
 
 def _request_json(method, url, **kwargs):
@@ -45,6 +51,7 @@ class GoogleOAuthService:
         redirect_uri = (
             redirect_uri or current_app.config["GOOGLE_REDIRECT_URI"]
         )
+        require_secure_callback(redirect_uri)
         state = secrets.token_urlsafe(32)
         session["google_oauth_state"] = state
         params = {
@@ -122,6 +129,7 @@ class LinkedInOAuthService:
             raise BadRequest(
                 "LINKEDIN_REDIRECT_URI n'est pas configuré"
             )
+        require_secure_callback(redirect_uri)
         state = secrets.token_urlsafe(32)
         session["linkedin_oauth_state"] = state
         params = {
@@ -183,4 +191,5 @@ class LinkedInOAuthService:
             "first_name": payload.get("given_name", ""),
             "last_name": payload.get("family_name", ""),
             "picture": payload.get("picture", ""),
+            "email_verified": payload.get("email_verified", False),
         }

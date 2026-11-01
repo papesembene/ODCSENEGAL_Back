@@ -2,6 +2,9 @@
 
 from datetime import datetime
 import os
+from uuid import uuid4
+from werkzeug.utils import secure_filename
+from app.utils.upload_security import IMAGE_EXTENSIONS, validate_upload
 
 from mongoengine.errors import ValidationError
 
@@ -159,7 +162,11 @@ class EventService:
             return "/static/images/event-default.jpg"
         upload_folder = os.path.join(static_folder, "uploads")
         os.makedirs(upload_folder, exist_ok=True)
-        filename = image_file.filename
+        try:
+            validate_upload(image_file, IMAGE_EXTENSIONS, 10 * 1024 * 1024)
+        except ValueError as error:
+            raise EventServiceError(str(error), 400) from error
+        filename = uuid4().hex + "_" + secure_filename(image_file.filename)
         image_file.save(os.path.join(upload_folder, filename))
         return f"/static/uploads/{filename}"
 

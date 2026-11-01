@@ -1,4 +1,5 @@
 import os
+from werkzeug.exceptions import NotFound
 
 from flask import (
     Blueprint,
@@ -149,13 +150,17 @@ def submit_application():
 
 
 @startup_bp.route("/uploads/<filename>", methods=["GET"])
+@admin_required({"startups", "super_admin"})
 def get_uploaded_file(filename):
     try:
-        return send_from_directory(UPLOAD_FOLDER, filename)
-    except FileNotFoundError:
+        response = send_from_directory(os.path.abspath(UPLOAD_FOLDER), filename, as_attachment=True)
+        response.headers['Cache-Control'] = 'private, no-store'
+        return response
+    except (FileNotFoundError, NotFound):
         return jsonify({"error": "Fichier introuvable"}), 404
     except Exception as error:
-        return jsonify({"error": str(error)}), 500
+        current_app.logger.exception("Echec de lecture du document startup")
+        return jsonify({"error": "Erreur interne du serveur"}), 500
 
 
 @startup_bp.route("/delete/<startup_id>", methods=["DELETE"])

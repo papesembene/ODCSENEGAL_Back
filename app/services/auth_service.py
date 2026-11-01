@@ -64,15 +64,24 @@ class AuthService:
         Returns:
             dict: Contient le token JWT et les informations utilisateur
         """
+        if provider not in {"google", "linkedin"} or not isinstance(oauth_id, str) or not oauth_id:
+            raise Unauthorized("Identité OAuth invalide")
         user = User.objects(oauth_provider=provider, oauth_id=oauth_id).first()
+        if user and not user.is_active:
+            raise Unauthorized("Compte désactivé")
 
         if not user:
             email = oauth_data.get('email')
-            if not email:
+            if not isinstance(email, str) or not email:
                 raise BadRequest("L'email est requis pour l'authentification OAuth")
+            if oauth_data.get('email_verified') is not True:
+                raise Unauthorized("Adresse email OAuth non vérifiée")
+            email = email.strip().lower()
 
             user = User.objects(email=email).first()
             if user:
+                if not user.is_active:
+                    raise Unauthorized("Compte désactivé")
                 # Associer un compte existant à OAuth
                 user.oauth_provider = provider
                 user.oauth_id = oauth_id
@@ -143,10 +152,12 @@ class AuthService:
             algorithms=['HS256'],
             options={
                 "verify_signature": True,
-                "require": ["exp", "iat", "sub"]
+                "require": ["exp", "iat", "sub", "user_id"]
             }
         )
 
+            if not isinstance(payload['user_id'], str) or payload['sub'] != payload['user_id']:
+                raise Unauthorized("Token invalide")
             user = User.objects(id=payload['user_id']).first()
 
             if not user or not user.is_active:
@@ -164,7 +175,7 @@ class AuthService:
         """Obtient l'utilisateur actuel à partir du token JWT dans le contexte"""
         from flask_jwt_extended import get_jwt_identity
         user_id = get_jwt_identity()
-        return User.objects(id=user_id).first()
+        return User.objects(id=user_id, is_active=True).first()
 
     @staticmethod
     def user_to_safe_json(user):

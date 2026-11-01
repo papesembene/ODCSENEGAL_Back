@@ -1,7 +1,9 @@
 from urllib.parse import urlencode
 
-from flask import Blueprint, request, jsonify, redirect, current_app, session
-from werkzeug.exceptions import BadRequest, Unauthorized, InternalServerError
+from flask import Blueprint, request, jsonify, redirect, current_app, session, send_from_directory
+from werkzeug.exceptions import BadRequest, Unauthorized, InternalServerError, NotFound
+from app.utils.auth_decorators import _extract_bearer_token
+from app.utils.request_guards import login_credentials, is_request_rate_limited
 from app.services.auth_service import AuthService
 from app.services.oauth_service import GoogleOAuthService, LinkedInOAuthService
 from app.services.profiles.profile_service import (
@@ -19,17 +21,22 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 profile_service = ProfileService()
 
+@auth_bp.after_request
+def private_auth_response(response):
+    response.headers.setdefault('Cache-Control', 'no-store')
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
+
 @auth_bp.route('/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
         return '', 200  # Réponse vide = préflight validé
-    data = request.get_json()
+    data = request.get_json(silent=True)
     
     if not data:
         raise BadRequest("Données manquantes")
     
-    email = data.get('email')
-    password = data.get('password')
+    email, password = login_credentials(data)
     
     if not email or not password:
         raise BadRequest("Email et mot de passe requis")
@@ -39,6 +46,8 @@ def login():
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
+    if is_request_rate_limited("profile_register_ip", request.remote_addr, limit=30, window=300):
+        return jsonify(error="Trop de tentatives, veuillez réessayer plus tard"), 429
     data = request.get_json() if request.is_json else request.form.to_dict()
     if not data:
         raise BadRequest("Données manquantes")
@@ -98,7 +107,7 @@ def google_callback():
         
         # 6. Rediriger vers la page de callback OAuth spécifique
         redirect_url = (
-            f"{frontend_url}/oauth-callback?"
+            f"{frontend_url}/oauth-callback#"
             f"{urlencode({'token': auth_result['token']})}"
         )
         return redirect(redirect_url)
@@ -159,7 +168,7 @@ def linkedin_callback():
         
         # 5. Rediriger vers le frontend avec le token
         return redirect(
-            f"{frontend_url}/oauth-callback?"
+            f"{frontend_url}/oauth-callback#"
             f"{urlencode({'token': auth_result['token']})}"
         )
     
@@ -187,6 +196,23 @@ def verify_token():
         'valid': True,
         'user': user.to_json()
     })
+
+
+@auth_bp.route('/documents/<path:filename>', methods=['GET'])
+def download_own_document(filename):
+    user = AuthService.verify_token(_extract_bearer_token())
+    normalized = filename.replace('\\', '/')
+    if normalized not in profile_service.document_paths(user):
+        raise NotFound('Document introuvable')
+    # Registrations used static/uploads; profile updates used app/uploads.
+    for root in (current_app.config['UPLOAD_FOLDER'], os.path.join(current_app.root_path, 'static', 'uploads')):
+        try:
+            response = send_from_directory(root, normalized, as_attachment=True)
+            response.headers['Cache-Control'] = 'private, no-store'
+            return response
+        except NotFound:
+            continue
+    raise NotFound('Document introuvable')
 
 @auth_bp.errorhandler(BadRequest)
 @auth_bp.errorhandler(Unauthorized)
@@ -241,6 +267,8 @@ def update_profile():
             'user': profile_service.serialize_update_response(user),
         })
 
+    except ProfileValidationError as error:
+        return jsonify(success=False, message=str(error)), 400
     except Exception as e:
         current_app.logger.error(f"Erreur update-profile: {str(e)}", exc_info=True)
         return jsonify({

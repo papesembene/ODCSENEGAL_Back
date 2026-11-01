@@ -71,8 +71,10 @@ def candidature_status():
 @candidature_public_bp.route("/apply", methods=["POST"])
 def apply():
     data = read_submission_payload()
+    if not isinstance(data, dict):
+        return jsonify(error="Objet JSON requis"), 400
     client_identifier = (
-        normalize_email((data or {}).get("email"))
+        (normalize_email(data.get("email")) if isinstance(data.get("email"), str) else "")
         or request.remote_addr
     )
     if is_request_rate_limited(
