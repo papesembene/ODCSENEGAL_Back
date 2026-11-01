@@ -185,12 +185,15 @@ class ApplicationSecurityTest(unittest.TestCase):
             self.assertEqual(response.headers['Cache-Control'],'private, no-store')
             response.close()
 
-    def test_oauth_redirect_does_not_put_session_token_in_query_string(self):
-        with patch('app.routes.auth_routes.GoogleOAuthService.validate_state'), patch('app.routes.auth_routes.GoogleOAuthService.get_token',return_value={'access_token':'provider-token'}), patch('app.routes.auth_routes.GoogleOAuthService.get_user_info',return_value={'oauth_id':'fixture'}), patch.object(AuthService,'login_with_oauth',return_value={'token':'synthetic-session'}):
-            response=self.client.get('/api/auth/google/callback?code=fixture')
-        self.assertEqual(response.status_code,302)
-        self.assertEqual(response.headers['Location'],'https://frontend.example.test/oauth-callback#token=synthetic-session')
-        self.assertEqual(response.headers['Cache-Control'],'no-store')
+    def test_external_login_routes_are_removed(self):
+        with patch.object(AuthService, 'login_with_oauth') as login:
+            for provider in ('google', 'linkedin'):
+                for action in ('authorize', 'callback?code=fixture'):
+                    with self.subTest(provider=provider, action=action):
+                        response = self.client.get(f'/api/auth/{provider}/{action}')
+                        self.assertEqual(response.status_code, 404)
+                        self.assertNotIn('Location', response.headers)
+            login.assert_not_called()
 
     def test_registration_payload_cannot_grant_administrative_roles(self):
         from test_profile_service import FakeUserRepository
