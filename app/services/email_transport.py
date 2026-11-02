@@ -7,6 +7,7 @@ import os
 import smtplib
 import ssl
 
+import requests
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from python_http_client.exceptions import HTTPError
@@ -22,8 +23,20 @@ class EmailTransport:
     def __init__(self, sendgrid_client=None):
         self.provider = os.getenv("EMAIL_PROVIDER", "auto").lower()
         self.brevo = BrevoEmailService()
+        self.resend_api_key = os.getenv("RESEND_API_KEY")
+        self.resend_from_email = (
+            os.getenv("RESEND_FROM_EMAIL") or os.getenv("MAIL_DEFAULT_SENDER")
+        )
+        self.resend_from_name = (
+            os.getenv("RESEND_FROM_NAME")
+            or os.getenv("EMAIL_FROM_NAME")
+            or "Orange Digital Center"
+        )
         key = os.getenv("SENDGRID_API_KEY")
-        self.sendgrid = sendgrid_client or (SendGridAPIClient(key) if key else None)
+        use_sendgrid = self.provider in {"auto", "sendgrid"} or sendgrid_client is not None
+        self.sendgrid = sendgrid_client or (
+            SendGridAPIClient(key) if key and use_sendgrid else None
+        )
         self.sender = (
             os.getenv("BREVO_FROM_EMAIL") if self.provider.startswith("brevo") else None
         ) or os.getenv("MAIL_DEFAULT_SENDER") or os.getenv("SENDGRID_FROM_EMAIL")
@@ -52,6 +65,8 @@ class EmailTransport:
         provider = self.selected_provider
         if provider in {"brevo", "brevo_smtp"}:
             return self.brevo.is_configured
+        if provider == "resend":
+            return bool(self.resend_api_key and self.resend_from_email)
         if provider == "sendgrid":
             return bool(self.sendgrid)
         return provider == "smtp" and bool(self.smtp_host and self.sender)
@@ -66,6 +81,8 @@ class EmailTransport:
         if provider in {"brevo", "brevo_smtp"}:
             return self.brevo.send_html(recipients, subject, html, reply_to)
         try:
+            if provider == "resend":
+                return self._send_resend(recipients, subject, html, reply_to)
             if provider == "sendgrid":
                 message = Mail(
                     from_email=self.sender or "orangedigitalcenter@orange-sonatel.com",
@@ -87,6 +104,32 @@ class EmailTransport:
         except Exception:
             logger.warning("Echec du transport email %s", provider)
             return {"sent": False, "retryable": True, "message": "Service email temporairement indisponible"}
+
+    def _send_resend(self, recipients, subject, html, reply_to):
+        sender = self.resend_from_email.strip()
+        if self.resend_from_name:
+            sender = f"{self.resend_from_name.strip()} <{sender}>"
+        payload = {
+            "from": sender,
+            "to": [item["email"] for item in recipients],
+            "subject": subject,
+            "html": html,
+        }
+        if reply_to:
+            payload["reply_to"] = reply_to
+
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {self.resend_api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self.timeout,
+        )
+        if 200 <= response.status_code < 300:
+            return {"sent": True, "message": "Email accepte par Resend"}
+        return self._failure(response.status_code)
 
     def _send_smtp(self, recipients, subject, html, reply_to):
         if self.smtp_tls and self.smtp_ssl:

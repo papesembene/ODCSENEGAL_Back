@@ -119,7 +119,8 @@ class Config:
             raise RuntimeError("REDIS_URL requis pour les sessions partagees")
         if cls.SESSION_TYPE not in {"redis", "filesystem"}:
             raise RuntimeError("SESSION_TYPE invalide")
-        if os.getenv("EMAIL_PROVIDER", "auto") not in {"auto", "brevo", "brevo_smtp", "sendgrid", "smtp"}:
+        email_provider = os.getenv("EMAIL_PROVIDER", "auto").lower()
+        if email_provider not in {"auto", "brevo", "brevo_smtp", "resend", "sendgrid", "smtp"}:
             raise RuntimeError("EMAIL_PROVIDER invalide")
         if os.getenv("EMAIL_DELIVERY_MODE", "sync") not in {"sync", "queued"}:
             raise RuntimeError("EMAIL_DELIVERY_MODE invalide")
@@ -137,6 +138,11 @@ class Config:
             missing.append("MONGO_URI")
         if not os.getenv("MONGO_DBNAME"):
             missing.append("MONGO_DBNAME")
+        if email_provider == "resend":
+            if not os.getenv("RESEND_API_KEY"):
+                missing.append("RESEND_API_KEY")
+            if not os.getenv("RESEND_FROM_EMAIL"):
+                missing.append("RESEND_FROM_EMAIL")
         if len(cls.SECRET_KEY) < 32 or len(cls.JWT_SECRET_KEY) < 32:
             missing.append("cles SECRET_KEY/JWT_SECRET_KEY d'au moins 32 caracteres")
         if os.getenv("RUN_PREPROD_SEED", "false").lower() == "true":

@@ -63,7 +63,9 @@ Definir ensemble `ODC_CAMPAIGN_YEAR=2026`,
 dans le fichier prive effectivement charge par l'API, puis redemarrer l'API.
 Ces valeurs sont lues au demarrage; le frontend ne necessite aucun changement.
 
-Choisir explicitement `EMAIL_PROVIDER=brevo`, `brevo_smtp`, `sendgrid` ou `smtp`.
+Choisir explicitement `EMAIL_PROVIDER=resend`, `brevo`, `brevo_smtp`, `sendgrid` ou `smtp`.
+Avec Resend, renseigner `RESEND_API_KEY` et `RESEND_FROM_EMAIL` dans le fichier
+prive du serveur; le domaine expediteur doit etre verifie dans Resend.
 Pour le relais de l'ancienne version, recuperer uniquement sa configuration email
 autorisee: serveur, port, TLS/SSL, expediteur et identifiants. Avec Brevo HTTP,
 utiliser une cle API (pas une cle `xsmtpsib`) et autoriser l'IP sortante du serveur.
