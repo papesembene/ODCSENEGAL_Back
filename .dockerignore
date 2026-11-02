@@ -24,3 +24,4 @@ node_modules
 npm-debug.log
 app/uploads
 app/static/uploads/portal
+app/static/uploads/trainings

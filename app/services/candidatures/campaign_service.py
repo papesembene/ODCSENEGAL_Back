@@ -4,6 +4,7 @@ from bson import ObjectId
 from mongoengine.errors import ValidationError
 
 from app.models.candidature_campaign import CandidatureCampaign
+from app.services.trainings.catalog import require_training
 
 
 class CandidatureCampaignServiceError(Exception):
@@ -66,6 +67,8 @@ class CandidatureCampaignService:
     def create(self, data, admin_email=""):
         values = self._normalize_payload(data)
         self._validate(values)
+        if values.get("formation", "all") != "all":
+            require_training(values["formation"])
         values["created_by"] = admin_email or ""
         values["updated_by"] = admin_email or ""
 
@@ -95,6 +98,8 @@ class CandidatureCampaignService:
             **values,
         }
         self._validate(merged)
+        if "formation" in values and values["formation"] != campaign.formation and values["formation"] != "all":
+            require_training(values["formation"])
 
         for key, value in values.items():
             setattr(campaign, key, value)

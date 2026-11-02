@@ -123,6 +123,7 @@ def create_app(config_class=Config):
     from app.routes.test_violation_routes import test_violation_bp
     from app.routes.interview_routes import interview_bp, interview_public_bp
     from app.routes.portal_content_routes import portal_content_bp
+    from app.routes.training_routes import training_bp
    
     from app.routes.test_routes import test_bp
     from app.routes.test_group_routes import test_group_bp
@@ -145,6 +146,7 @@ def create_app(config_class=Config):
     app.register_blueprint(interview_bp, url_prefix='/api/admin')
     app.register_blueprint(interview_public_bp, url_prefix='/api/interviews')
     app.register_blueprint(portal_content_bp, url_prefix='/api')
+    app.register_blueprint(training_bp, url_prefix='/api')
    
     app.register_blueprint(test_bp, url_prefix='/api/admin')
     app.register_blueprint(test_group_bp, url_prefix='/api/admin')
@@ -153,6 +155,12 @@ def create_app(config_class=Config):
     app.register_blueprint(candidature_bp, url_prefix='/api/admin')
    
     register_error_handlers(app)
+
+    from app.services.trainings.schema import TrainingCatalogError
+
+    @app.errorhandler(TrainingCatalogError)
+    def training_error(error):
+        return {"success": False, "error": str(error)}, error.status_code
  
     @app.route('/')
     def index():

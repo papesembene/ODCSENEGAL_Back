@@ -9,8 +9,9 @@ from app.models.candidature import Candidature
 from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.services.test_email_service import TestEmailService
-from app.services.tests.formation_catalog import FORMATIONS, formation_aliases
+from app.services.tests.formation_catalog import FORMATIONS, formation_aliases, formation_values
 from app.repositories.candidature_filters import candidate_filter
+from app.services.trainings.catalog import require_training
 from app.services.tests.campaign_scope import (
     normalize_campaign_year,
     test_ids_for_campaign,
@@ -101,6 +102,7 @@ class TestGroupService:
             data["candidate_ids"],
         )
         self._ensure_candidates_exist(data["candidate_ids"])
+        require_training(data["formation"])
         self._ensure_candidates_available(
             candidate_ids=data["candidate_ids"],
             formation=data["formation"],
@@ -129,6 +131,8 @@ class TestGroupService:
     def update_group(self, group_id, data):
         group = self.get_group(group_id)
         data = data or {}
+        if "formation" in data and data["formation"] != group.formation:
+            require_training(data["formation"])
         changed_date = "test_date" in data and self._parse_date(data["test_date"]) != group.test_date
         if changed_date or any(field in data and data[field] != getattr(group, field, None) for field in ("test_id", "duration")):
             group.invitation_batch_key = None
@@ -242,7 +246,7 @@ class TestGroupService:
         groups = TestGroup.objects(**filters).filter(__raw__=campaign_query)
         payload = TestGroupService._group_counts(groups)
         payload["formationStats"] = {}
-        for item in TestGroupService.FORMATIONS:
+        for item in formation_values():
             payload["formationStats"][item] = (
                 TestGroupService._group_counts(
                     TestGroup.objects(

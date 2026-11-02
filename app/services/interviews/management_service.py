@@ -8,6 +8,7 @@ from mongoengine.connection import ConnectionFailure
 from app.models.interview import InterviewSlot
 from app.models.user import User
 from app.repositories.interview_repository import InterviewRepository
+from app.services.trainings.catalog import require_training
 from app.services.interviews.availability_email_service import (
     InterviewAvailabilityEmailService,
 )
@@ -44,6 +45,7 @@ class InterviewManagementService:
     def create_campaign(self, data):
         name = self._required_text(data, "name")
         formation = self._required_text(data, "formation")
+        require_training(formation)
         campaign = self.repository.create_campaign(
             name=name,
             formation=formation,
@@ -59,6 +61,9 @@ class InterviewManagementService:
         campaign = self.repository.get_campaign(campaign_id)
         if not campaign:
             raise InterviewNotFoundError("Campagne non trouvée")
+
+        if "formation" in data and data["formation"] != campaign.formation:
+            require_training(data["formation"])
 
         for field in self.CAMPAIGN_UPDATE_FIELDS:
             if field in data:

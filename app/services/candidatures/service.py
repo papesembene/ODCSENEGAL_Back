@@ -12,6 +12,9 @@ from app.services.candidatures.campaign_service import (
     CandidatureCampaignServiceError,
 )
 from app.utils.request_guards import normalize_email, normalize_phone
+from app.services.trainings.catalog import require_training
+from app.services.trainings.schema import TrainingCatalogError
+from app.services.tests.formation_catalog import formation_values
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +59,7 @@ class CandidatureService:
         "desired_training",
         "region_of_residence",
     )
-    REFERENTIALS = (
-        "Dev Web",
-        "Data",
-        "Hackeuse",
-        "AWS",
-        "Référent Digital",
-    )
+
 
     def __init__(self, repository=None, now=None, campaign_service=None):
         self.repository = repository or CandidatureRepository()
@@ -71,7 +68,9 @@ class CandidatureService:
 
     def submit(self, data):
         self._validate_submission(data)
-        self._assert_submission_open(data.get("desired_training"))
+        training = self._assert_submission_open(data.get("desired_training"))
+        if training["femaleOnly"] and str(data.get("gender", "")).strip().casefold() not in {"female", "femme", "f", "feminin", "féminin"}:
+            raise CandidatureServiceError("Cette formation est réservée aux femmes.")
         email = normalize_email(data["email"])
         phone = normalize_phone(data["phone"])
 
@@ -127,8 +126,10 @@ class CandidatureService:
 
     def _assert_submission_open(self, desired_training):
         try:
-            self.campaign_service.assert_open(desired_training)
-        except CandidatureCampaignServiceError as error:
+            training = require_training(desired_training, public=True)
+            self.campaign_service.assert_open(training["code"])
+            return training
+        except (CandidatureCampaignServiceError, TrainingCatalogError) as error:
             raise CandidatureServiceError(str(error), error.status_code) from error
         except ValidationError as error:
             raise CandidatureServiceError(
@@ -208,7 +209,7 @@ class CandidatureService:
     def get_statistics(self, desired_training=None):
         candidatures = self.repository.list_for_training(desired_training)
         referential_stats = {}
-        for referential in self.REFERENTIALS:
+        for referential in formation_values():
             referential_items = self.repository.list_for_training(
                 referential,
             )

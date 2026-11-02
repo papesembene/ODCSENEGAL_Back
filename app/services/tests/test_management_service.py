@@ -9,6 +9,7 @@ from app.models.test import Question, Test
 from app.models.test_result import Candidate, TestResult
 from app.services.tests.test_scoring import calculate_test_score
 from app.services.tests.campaign_scope import current_campaign_year, tests_for_campaign
+from app.services.trainings.catalog import require_training
 
 
 class TestServiceError(Exception):
@@ -53,6 +54,7 @@ class TestManagementService:
     def create_test(self, data):
         data = data or {}
         self._require_fields(data, self.REQUIRED_TEST_FIELDS)
+        require_training(data["referentiel"])
         questions = self._build_questions(data.get("questions", []))
         test = Test(
             title=data["title"],
@@ -80,6 +82,8 @@ class TestManagementService:
     def update_test(self, test_id, data):
         test = self.get_test(test_id)
         data = data or {}
+        if "referentiel" in data and data["referentiel"] != test.referentiel:
+            require_training(data["referentiel"])
         for field in self.TEST_UPDATE_FIELDS:
             if field in data:
                 setattr(test, field, data[field])

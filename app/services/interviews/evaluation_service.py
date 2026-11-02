@@ -6,6 +6,7 @@ from datetime import datetime
 from mongoengine.errors import NotUniqueError
 
 from app.models.candidature import Candidature
+from app.repositories.candidature_filters import candidate_filter
 from app.models.interview import (
     InterviewCampaign,
     InterviewEvaluation,
@@ -66,7 +67,7 @@ class InterviewEvaluationService:
             )
         candidates = list(
             Candidature.objects(
-                desired_training=formation,
+                __raw__=candidate_filter({"desired_training": formation}),
             ).order_by("created_at")
         )
         admitted_emails = self._admitted_emails(candidates)

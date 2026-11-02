@@ -5,15 +5,10 @@ from math import ceil
 
 from app.models.candidature import Candidature
 from app.repositories.candidature_filters import candidate_filter
-from app.services.tests.formation_catalog import normalize_formation
+from app.services.trainings.catalog import find_training, get_catalog
 
 
 PAGE_FIELDS = ("first_name", "last_name", "email", "phone", "gender", "desired_training", "status", "created_at")
-TRAININGS = {
-    "Dev Web": "dev-web-mobile", "Data": "dev-data", "Hackeuse": "hackeuses",
-    "AWS": "aws-cloud", "R\u00e9f\u00e9rent Digital": "referent-digital",
-    "Cyber security": "cyber-security", "Intelligence Artificielle": "intelligence-artificielle",
-}
 EMPTY_COUNTS = dict(total=0, femmes=0, hommes=0, acceptes=0, enAttente=0, refuses=0)
 
 
@@ -89,8 +84,10 @@ class CandidatureReadRepository:
             ],
         }}], maxTimeMS=15000))
         formations = {}
+        catalog = get_catalog()
         for row in result["formations"]:
-            key = TRAININGS.get(normalize_formation(row["_id"]), row["_id"]) or "Non renseigne"
+            training = find_training(row["_id"], catalog)
+            key = (training["code"] if training else row["_id"]) or "Non renseigne"
             totals = formations.setdefault(key, dict(EMPTY_COUNTS))
             for field in EMPTY_COUNTS:
                 totals[field] += row[field]

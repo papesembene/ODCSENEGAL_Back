@@ -30,6 +30,7 @@ def ensure_critical_indexes():
     from app.models.portal_content import PortalContent
     from app.models.candidature_campaign import CandidatureCampaign
     from app.models.email_job import EmailJob
+    from app.models.training import Training
 
     models = (
         Candidature,
@@ -44,6 +45,7 @@ def ensure_critical_indexes():
         PortalContent,
         CandidatureCampaign,
         EmailJob,
+        Training,
     )
     ensured = []
 

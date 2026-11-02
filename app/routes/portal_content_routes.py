@@ -1,16 +1,12 @@
-import os
-import uuid
-
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from werkzeug.exceptions import BadRequest
-from werkzeug.utils import secure_filename
 
 from app.services.portal_content_service import (
     PortalContentService,
     PortalContentServiceError,
 )
 from app.utils.auth_decorators import admin_required
-from app.utils.upload_security import IMAGE_EXTENSIONS, validate_upload
+from app.services.public_image_service import save_public_image
 
 
 portal_content_bp = Blueprint("portal_content", __name__)
@@ -23,21 +19,7 @@ def _error_response(error):
 
 
 def _save_portal_image(file_storage):
-    if not file_storage or not file_storage.filename:
-        raise BadRequest("Image requise")
-
-    try:
-        validate_upload(file_storage, IMAGE_EXTENSIONS, 10 * 1024 * 1024)
-    except ValueError as error:
-        raise BadRequest(str(error)) from error
-
-    filename = secure_filename(file_storage.filename)
-    unique_filename = f"{uuid.uuid4().hex}_{filename}"
-    relative_folder = os.path.join("uploads", "portal")
-    absolute_folder = os.path.join(current_app.root_path, "static", relative_folder)
-    os.makedirs(absolute_folder, exist_ok=True)
-    file_storage.save(os.path.join(absolute_folder, unique_filename))
-    return f"/static/uploads/portal/{unique_filename}"
+    return save_public_image(file_storage, "portal")
 
 
 @portal_content_bp.route("/portal-content/public", methods=["GET"])

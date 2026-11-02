@@ -8,6 +8,7 @@ from app.models.startup import Startup
 from app.models.test import Test
 from app.models.test_group import TestGroup
 from app.models.test_result import TestResult
+from app.services.trainings.catalog import find_training, get_catalog
 from app.services.tests.campaign_scope import (
     current_campaign_year,
     test_ids_for_campaign,
@@ -15,15 +16,6 @@ from app.services.tests.campaign_scope import (
 )
 
 
-FORMATIONS = (
-    "Dev Web",
-    "Data",
-    "Hackeuse",
-    "AWS",
-    "Référent Digital",
-    "Cyber security",
-    "Intelligence Artificielle",
-)
 DAYS_FR = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
 
 
@@ -139,7 +131,6 @@ class DashboardMetricsService:
 
     def _formations(self):
         pipeline = [
-            {"$match": {"desired_training": {"$in": list(FORMATIONS)}}},
             {
                 "$group": {
                     "_id": "$desired_training",
@@ -148,6 +139,11 @@ class DashboardMetricsService:
             },
         ]
         rows = Candidature._get_collection().aggregate(pipeline)
-        counts = {formation: 0 for formation in FORMATIONS}
-        counts.update({row["_id"]: row["count"] for row in rows})
+        catalog = get_catalog()
+        counts = {training["value"]: 0 for training in catalog}
+        for row in rows:
+            training = find_training(row["_id"], catalog)
+            key = training["value"] if training else row["_id"]
+            if key:
+                counts[key] = counts.get(key, 0) + row["count"]
         return counts
