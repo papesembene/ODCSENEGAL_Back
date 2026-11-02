@@ -1,9 +1,9 @@
 """Bounded production registration load test using synthetic candidates only.
 
 The email worker must be paused before running this against production.
-Each Locust user submits at most one candidate. The run ID is embedded in
-email and identity fields so those records and their queued emails can be
-removed exactly after the test.
+Each Locust user first opens its own keep-alive connection, then submits at
+most one candidate. The run ID is embedded in email and identity fields so
+those records and their queued emails can be removed exactly after the test.
 """
 
 from itertools import count
@@ -53,9 +53,6 @@ RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
 _indices = count(1)
 _result_lock = Lock()
 _base_url_checked = False
-_preflight_lock = Semaphore()
-_preflight_done = Event()
-_preflight_open = False
 _burst_gate = Event()
 _burst_lock = Semaphore()
 _burst_ready = 0
@@ -72,7 +69,7 @@ class ProductionRegistrationUser(HttpUser):
     wait_time = between(0.2, 0.5)
 
     def on_start(self):
-        global _base_url_checked, _burst_ready, _preflight_open
+        global _base_url_checked, _burst_ready
         parsed = urlparse(self.host or "")
         if parsed.scheme != "https" or parsed.netloc.lower() != "api.orangedigitalcenter.sn":
             raise RuntimeError("This test is restricted to the production API hostname.")
@@ -87,39 +84,26 @@ class ProductionRegistrationUser(HttpUser):
         self.identity = f"LOADTEST-{RUN_ID}-{self.index}"
         # Unique synthetic 9-digit values; candidature phone is not a unique DB index.
         self.phone = str(700_000_000 + self.index)
-        if not _preflight_done.is_set():
-            with _preflight_lock:
-                if not _preflight_done.is_set():
-                    try:
-                        response = self.client.get(
-                            "/api/candidature/status",
-                            params={"formation": FORMATION},
-                            name="GET /api/candidature/status (single preflight)",
-                            timeout=10,
-                        )
-                        try:
-                            body = response.json()
-                        except ValueError:
-                            body = {}
-                        _preflight_open = (
-                            response.status_code == 200
-                            and body.get("data", {}).get("isOpen") is True
-                        )
-                        if not _preflight_open:
-                            LOGGER.error(
-                                "Campaign preflight failed (HTTP %s); no candidate was submitted.",
-                                response.status_code,
-                            )
-                    except RequestException as error:
-                        LOGGER.error("Production campaign preflight failed: %s", error)
-                        _preflight_open = False
-                    finally:
-                        _preflight_done.set()
-        elif not _preflight_done.wait(timeout=15):
-            LOGGER.error("Campaign preflight did not finish; no candidate was submitted.")
-            raise StopUser()
-        if not _preflight_open:
-            raise StopUser()
+        try:
+            response = self.client.get(
+                "/api/candidature/status",
+                params={"formation": FORMATION},
+                name="GET /api/candidature/status (connection warm-up)",
+                timeout=10,
+            )
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            if response.status_code != 200 or body.get("data", {}).get("isOpen") is not True:
+                LOGGER.error(
+                    "Campaign preflight failed (HTTP %s); no candidate was submitted.",
+                    response.status_code,
+                )
+                raise StopUser()
+        except RequestException as error:
+            LOGGER.error("Production campaign preflight failed: %s", error)
+            raise StopUser() from error
         if SYNC_BURST:
             with _burst_lock:
                 _burst_ready += 1
