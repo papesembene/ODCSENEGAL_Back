@@ -203,11 +203,19 @@ try {
     Write-Output 'Deploiement frontend reussi: site public HTTP 200.'
     Write-Output "Service: $candidateName ; port: $port ; build: $buildId"
     Write-Output "Release: $release"
-    Write-Output "Retour arriere: configuration et chemins conserves dans $backupDir"
+    Write-Output 'Configuration de secours temporaire creee pour ce deploiement.'
     try {
         Save-OdcPublishedDeployment -Component frontend -ReleaseRoot $releaseRoot -PreviousPath $active.Frontend -BackupDirectory $backupDir
         & $cleanup
     } catch { Write-Warning ('Frontend publie; nettoyage differe: '+$_.Exception.Message) }
+    finally {
+        if (Test-Path -LiteralPath $backupDir -PathType Container) {
+            try {
+                Remove-OdcTreeNoFollow -Path $backupDir -AllowedRoot 'C:\Orange Digital Center\archives\sauvegardes'
+                Write-Output 'Configuration de secours temporaire supprimee apres validation.'
+            } catch { Write-Warning ('Configuration temporaire conservee pour intervention: '+$_.Exception.Message) }
+        }
+    }
 } catch {
     $deploymentError = $_
     if (-not $committed) {

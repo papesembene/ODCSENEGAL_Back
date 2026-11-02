@@ -15,6 +15,8 @@ import re
 from threading import Lock
 from urllib.parse import urlparse
 
+from gevent.event import Event
+from gevent.lock import Semaphore
 from locust import HttpUser, between, task
 from locust.exception import StopUser
 
@@ -27,8 +29,17 @@ if os.getenv("ODC_LOAD_EMAILS_PAUSED") != "YES":
     raise RuntimeError("Pause the production email worker before this test.")
 
 MAX_SIGNUPS = int(os.getenv("ODC_LOAD_MAX_SIGNUPS", "10"))
-if not 1 <= MAX_SIGNUPS <= 100:
-    raise RuntimeError("ODC_LOAD_MAX_SIGNUPS must be between 1 and 100 per run.")
+if not 1 <= MAX_SIGNUPS <= 1000:
+    raise RuntimeError("ODC_LOAD_MAX_SIGNUPS must be between 1 and 1000 per run.")
+if MAX_SIGNUPS > 100 and os.getenv("ODC_LOAD_ALLOW_LARGE_PROD") != "YES":
+    raise RuntimeError(
+        "More than 100 production signups requires ODC_LOAD_ALLOW_LARGE_PROD=YES."
+    )
+SYNC_BURST = os.getenv("ODC_LOAD_SYNC_BURST") == "YES"
+if MAX_SIGNUPS > 100 and not SYNC_BURST:
+    raise RuntimeError(
+        "More than 100 production signups requires ODC_LOAD_SYNC_BURST=YES."
+    )
 
 FORMATION = os.getenv("ODC_LOAD_FORMATION", "Dev Web")
 RESULT_FILE = Path(
@@ -41,6 +52,9 @@ RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
 _indices = count(1)
 _result_lock = Lock()
 _base_url_checked = False
+_burst_gate = Event()
+_burst_lock = Semaphore()
+_burst_ready = 0
 
 
 def _save_result(result):
@@ -54,7 +68,7 @@ class ProductionRegistrationUser(HttpUser):
     wait_time = between(0.2, 0.5)
 
     def on_start(self):
-        global _base_url_checked
+        global _base_url_checked, _burst_ready
         parsed = urlparse(self.host or "")
         if parsed.scheme != "https" or parsed.netloc.lower() != "api.orangedigitalcenter.sn":
             raise RuntimeError("This test is restricted to the production API hostname.")
@@ -83,6 +97,15 @@ class ProductionRegistrationUser(HttpUser):
         except (ValueError, OSError) as error:
             LOGGER.error("Production campaign preflight failed: %s", error)
             raise StopUser() from error
+        if SYNC_BURST:
+            with _burst_lock:
+                _burst_ready += 1
+                release_burst = _burst_ready >= MAX_SIGNUPS
+            if release_burst:
+                _burst_gate.set()
+            if not _burst_gate.wait(timeout=60):
+                LOGGER.error("Not all synthetic users reached the burst gate; no candidate was submitted.")
+                raise StopUser()
 
     @task
     def submit_one_synthetic_candidate(self):

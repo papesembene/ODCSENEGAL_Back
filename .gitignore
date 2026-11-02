@@ -195,6 +195,9 @@ logs/
 # Runtime uploads
 app/static/uploads/
 
+# Flask-Session filesystem data (temporary runtime state)
+flask_session/
+
 # Load-test generated data
 load_tests/candidats-*.csv
 

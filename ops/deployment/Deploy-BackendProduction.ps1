@@ -259,12 +259,20 @@ try {
         Write-Output 'Deploiement API reussi: MongoDB sain, deux acces API publics et frontend HTTP 200.'
         Write-Output "Service: $candidateName ; port: $port"
         Write-Output "Release: $release"
-        Write-Output "Sauvegarde et retour arriere: $backupDir"
+        Write-Output 'Sauvegarde de securite temporaire creee pour ce deploiement.'
         Write-Output 'Worker email aligne sur cette release.'
         try {
             Save-OdcPublishedDeployment -Component backend -ReleaseRoot $releaseRoot -PreviousPath $active.Backend -BackupDirectory $backupDir
             & $cleanup
         } catch { Write-Warning ('API et worker publies; nettoyage differe: '+$_.Exception.Message) }
+        finally {
+            if (Test-Path -LiteralPath $backupDir -PathType Container) {
+                try {
+                    Remove-OdcTreeNoFollow -Path $backupDir -AllowedRoot 'C:\Orange Digital Center\archives\sauvegardes'
+                    Write-Output 'Sauvegarde temporaire supprimee apres validation.'
+                } catch { Write-Warning ('Sauvegarde temporaire conservee pour intervention: '+$_.Exception.Message) }
+            }
+        }
     } catch {
         $deploymentError = $_
         if (-not $committed) {
