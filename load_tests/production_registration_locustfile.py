@@ -169,7 +169,11 @@ class ProductionRegistrationUser(HttpUser):
                 record["http_status"] = response.status_code
                 record["candidature_id"] = body.get("candidature_id")
                 record["email_status"] = body.get("email_status")
-                if (
+                request_error = getattr(response, "error", None)
+                if request_error:
+                    record["request_error"] = str(request_error)
+                    response.failure(f"Erreur transport : {request_error}")
+                elif (
                     response.status_code == 201
                     and record["candidature_id"]
                     and record["email_status"] == "queued"
