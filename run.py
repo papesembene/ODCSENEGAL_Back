@@ -1,5 +1,6 @@
 """Production entrypoint for the ODC backend."""
 
+import ctypes
 import logging
 import os
 import socket
@@ -24,6 +25,19 @@ if os.getenv("TRUST_PROXY_HEADERS", "true").lower() == "true":
 logger = configure_observability(app)
 
 
+def _listen_windows(listener, backlog):
+    # SOMAXCONN_HINT(N) is -N. Python's socket.listen() normalizes negative
+    # values to zero, so the first listen must call WinSock directly.
+    winsock = ctypes.WinDLL("Ws2_32")
+    winsock.listen.argtypes = (ctypes.c_size_t, ctypes.c_int)
+    winsock.listen.restype = ctypes.c_int
+    winsock.WSAGetLastError.argtypes = ()
+    winsock.WSAGetLastError.restype = ctypes.c_int
+    if winsock.listen(listener.fileno(), -backlog) != 0:
+        code = winsock.WSAGetLastError()
+        raise OSError(code, f"Windows listen failed for backlog {backlog}")
+
+
 def run_server():
     # Containers must listen on their interface; Windows NSSM sets HOST=127.0.0.1.
     host = os.getenv("HOST", "0.0.0.0")  # nosec B104
@@ -38,6 +52,8 @@ def run_server():
         # Keep that map below Windows select()'s 512-socket limit.
         connection_limit = min(connection_limit, 500)
     backlog = int(os.getenv("WAITRESS_BACKLOG", "2048" if os.name == "nt" else "1024"))
+    if os.name == "nt" and not 200 <= backlog <= 65535:
+        raise ValueError("WAITRESS_BACKLOG must be between 200 and 65535 on Windows.")
     max_body_size = int(
         os.getenv(
             "WAITRESS_MAX_REQUEST_BODY_SIZE",
@@ -66,15 +82,16 @@ def run_server():
         max_request_body_size=max_body_size,
         connection_limit=connection_limit,
         backlog=backlog,
+        **({"_start": False} if os.name == "nt" else {}),
     )
     try:
         if os.name == "nt":
-            # Waitress's Windows dispatcher clamps listen(backlog) to 5.
-            # Reapply it on the native listening socket before accepting traffic.
             listener = getattr(server, "socket", None)
             if listener is None:
                 raise RuntimeError("Windows requires one listening socket; configure HOST as a single IPv4 address.")
-            listener.listen(backlog)
+            # WinSock ignores backlog changes after the first listen.
+            _listen_windows(listener, backlog)
+            server.accept_connections()
         server.run()
     finally:
         server.close()
