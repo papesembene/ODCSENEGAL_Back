@@ -4,7 +4,7 @@ import logging
 import os
 import socket
 
-from waitress import serve
+from waitress import create_server
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app import create_app
@@ -37,6 +37,7 @@ def run_server():
         # Waitress counts its listener and trigger in the same socket map.
         # Keep that map below Windows select()'s 512-socket limit.
         connection_limit = min(connection_limit, 500)
+    backlog = int(os.getenv("WAITRESS_BACKLOG", "2048" if os.name == "nt" else "1024"))
     max_body_size = int(
         os.getenv(
             "WAITRESS_MAX_REQUEST_BODY_SIZE",
@@ -44,13 +45,14 @@ def run_server():
         )
     )
     logger.info(
-        "Démarrage du serveur %s:%s, threads=%s, connection_limit=%s",
+        "Démarrage du serveur %s:%s, threads=%s, connection_limit=%s, backlog=%s",
         host,
         port,
         threads,
         connection_limit,
+        backlog,
     )
-    serve(
+    server = create_server(
         app,
         host=host,
         port=port,
@@ -63,7 +65,19 @@ def run_server():
         ),
         max_request_body_size=max_body_size,
         connection_limit=connection_limit,
+        backlog=backlog,
     )
+    try:
+        if os.name == "nt":
+            # Waitress's Windows dispatcher clamps listen(backlog) to 5.
+            # Reapply it on the native listening socket before accepting traffic.
+            listener = getattr(server, "socket", None)
+            if listener is None:
+                raise RuntimeError("Windows requires one listening socket; configure HOST as a single IPv4 address.")
+            listener.listen(backlog)
+        server.run()
+    finally:
+        server.close()
 
 
 if __name__ == "__main__":
