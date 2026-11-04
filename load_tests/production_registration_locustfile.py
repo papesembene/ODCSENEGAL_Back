@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 from threading import Lock
+from time import monotonic
 from urllib.parse import urlparse
 
 from gevent.event import Event
@@ -55,6 +56,45 @@ _base_url_checked = False
 _burst_gate = Event()
 _burst_lock = Semaphore()
 _burst_ready = 0
+_burst_aborted = False
+_burst_released = False
+_burst_deadline = None
+
+
+def _abort_burst():
+    global _burst_aborted
+    with _burst_lock:
+        if not _burst_released:
+            _burst_aborted = True
+            _burst_gate.set()
+
+
+def _wait_for_burst():
+    global _burst_ready, _burst_aborted, _burst_released, _burst_deadline
+    with _burst_lock:
+        if _burst_aborted:
+            return False
+        now = monotonic()
+        if _burst_deadline is None:
+            _burst_deadline = now + 60
+        # Check the shared deadline before counting a late participant. A timed
+        # out user must never remain eligible to release a partial burst.
+        if now >= _burst_deadline:
+            _burst_aborted = True
+            _burst_gate.set()
+            return False
+        _burst_ready += 1
+        if _burst_ready == MAX_SIGNUPS:
+            _burst_released = True
+            _burst_gate.set()
+        remaining = _burst_deadline - now
+
+    _burst_gate.wait(timeout=remaining)
+    with _burst_lock:
+        if not _burst_released:
+            _burst_aborted = True
+            _burst_gate.set()
+        return _burst_released and not _burst_aborted
 
 
 def _save_result(result):
@@ -68,7 +108,7 @@ class ProductionRegistrationUser(HttpUser):
     wait_time = between(0.2, 0.5)
 
     def on_start(self):
-        global _base_url_checked, _burst_ready
+        global _base_url_checked
         parsed = urlparse(self.host or "")
         if parsed.scheme != "https" or parsed.netloc.lower() != "api.orangedigitalcenter.sn":
             raise RuntimeError("This test is restricted to the production API hostname.")
@@ -98,22 +138,22 @@ class ProductionRegistrationUser(HttpUser):
             except ValueError:
                 body = {}
             if response.status_code != 200 or body.get("data", {}).get("isOpen") is not True:
+                if SYNC_BURST:
+                    _abort_burst()
                 LOGGER.error(
-                    "Campaign preflight failed (HTTP %s); no candidate was submitted.",
+                    "Campaign preflight failed (HTTP %s, error=%s); no candidate was submitted.",
                     response.status_code,
+                    getattr(response, "error", None),
                 )
                 return
         except RequestException as error:
+            if SYNC_BURST:
+                _abort_burst()
             LOGGER.error("Production campaign preflight failed: %s", error)
             return
         if SYNC_BURST:
-            with _burst_lock:
-                _burst_ready += 1
-                release_burst = _burst_ready >= MAX_SIGNUPS
-            if release_burst:
-                _burst_gate.set()
-            if not _burst_gate.wait(timeout=60):
-                LOGGER.error("Not all synthetic users reached the burst gate; no candidate was submitted.")
+            if not _wait_for_burst():
+                LOGGER.error("Synthetic burst aborted: a preflight failed or the shared deadline expired; no candidate was submitted.")
                 return
         self.should_submit = True
 
