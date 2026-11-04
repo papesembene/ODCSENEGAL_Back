@@ -18,7 +18,6 @@ from urllib.parse import urlparse
 from gevent.event import Event
 from gevent.lock import Semaphore
 from locust import HttpUser, between, task
-from locust.exception import StopUser
 from requests.exceptions import RequestException
 
 
@@ -78,8 +77,11 @@ class ProductionRegistrationUser(HttpUser):
 
         self.index = next(_indices)
         if self.index > MAX_SIGNUPS:
-            raise StopUser()
+            self.should_submit = False
+            return
 
+        self.should_submit = False
+        self.submitted = False
         self.email = f"load-{RUN_ID}-{self.index}@example.invalid"
         self.identity = f"LOADTEST-{RUN_ID}-{self.index}"
         # Unique synthetic 9-digit values; candidature phone is not a unique DB index.
@@ -100,10 +102,10 @@ class ProductionRegistrationUser(HttpUser):
                     "Campaign preflight failed (HTTP %s); no candidate was submitted.",
                     response.status_code,
                 )
-                raise StopUser()
+                return
         except RequestException as error:
             LOGGER.error("Production campaign preflight failed: %s", error)
-            raise StopUser() from error
+            return
         if SYNC_BURST:
             with _burst_lock:
                 _burst_ready += 1
@@ -112,10 +114,14 @@ class ProductionRegistrationUser(HttpUser):
                 _burst_gate.set()
             if not _burst_gate.wait(timeout=60):
                 LOGGER.error("Not all synthetic users reached the burst gate; no candidate was submitted.")
-                raise StopUser()
+                return
+        self.should_submit = True
 
     @task
     def submit_one_synthetic_candidate(self):
+        if not self.should_submit or self.submitted:
+            return
+
         payload = {
             "first_name": "TEST-CHARGE",
             "last_name": f"ODC-{RUN_ID}-{self.index}",
@@ -167,4 +173,6 @@ class ProductionRegistrationUser(HttpUser):
                     response.failure(f"Inscription refusée (HTTP {response.status_code}).")
                 _save_result(record)
         finally:
-            raise StopUser()
+            # Keep the Locust user alive but idle. Stopping it makes Locust spawn
+            # a replacement, which can exceed MAX_SIGNUPS and flood logs.
+            self.submitted = True
