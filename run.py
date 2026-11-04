@@ -31,12 +31,12 @@ def run_server():
     threads = int(os.getenv("WAITRESS_THREADS", "8"))
     timeout = int(os.getenv("WAITRESS_CHANNEL_TIMEOUT", "120"))
     connection_limit = int(
-        os.getenv("WAITRESS_CONNECTION_LIMIT", "256" if os.name == "nt" else "1000")
+        os.getenv("WAITRESS_CONNECTION_LIMIT", "500" if os.name == "nt" else "1000")
     )
     if os.name == "nt":
-        # Windows uses select(), whose socket limit must include listener and
-        # internal sockets as well as client connections.
-        connection_limit = min(connection_limit, 256)
+        # Waitress counts its listener and trigger in the same socket map.
+        # Keep that map below Windows select()'s 512-socket limit.
+        connection_limit = min(connection_limit, 500)
     max_body_size = int(
         os.getenv(
             "WAITRESS_MAX_REQUEST_BODY_SIZE",

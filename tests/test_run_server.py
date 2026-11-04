@@ -18,9 +18,9 @@ class ProductionServerConnectionLimitTest(unittest.TestCase):
 
     def test_platform_connection_limits_and_startup_log(self):
         cases = [
-            ("nt", None, 256),
-            ("nt", "1000", 256),
-            ("nt", "512", 256),
+            ("nt", None, 500),
+            ("nt", "1000", 500),
+            ("nt", "512", 500),
             ("nt", "128", 128),
             ("posix", None, 1000),
             ("posix", "2048", 2048),
