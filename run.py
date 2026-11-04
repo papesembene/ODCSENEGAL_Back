@@ -31,8 +31,12 @@ def run_server():
     threads = int(os.getenv("WAITRESS_THREADS", "8"))
     timeout = int(os.getenv("WAITRESS_CHANNEL_TIMEOUT", "120"))
     connection_limit = int(
-        os.getenv("WAITRESS_CONNECTION_LIMIT", "1000")
+        os.getenv("WAITRESS_CONNECTION_LIMIT", "256" if os.name == "nt" else "1000")
     )
+    if os.name == "nt":
+        # Windows uses select(), whose socket limit must include listener and
+        # internal sockets as well as client connections.
+        connection_limit = min(connection_limit, 256)
     max_body_size = int(
         os.getenv(
             "WAITRESS_MAX_REQUEST_BODY_SIZE",
@@ -40,10 +44,11 @@ def run_server():
         )
     )
     logger.info(
-        "Démarrage du serveur %s:%s, threads=%s",
+        "Démarrage du serveur %s:%s, threads=%s, connection_limit=%s",
         host,
         port,
         threads,
+        connection_limit,
     )
     serve(
         app,
