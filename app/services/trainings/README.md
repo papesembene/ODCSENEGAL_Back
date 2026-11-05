@@ -16,6 +16,30 @@ modifier. Le CM ne gere pas les referentiels.
   suivant les droits existants. Un nouveau referentiel n'herite pas des
   criteres metier de Developpement Web.
 
+## Affectations Selon La Residence
+
+Chaque referentiel porte une regle de residence complete, independante de son
+nom et de son lieu physique de formation. `applicationRegionMode: "all"`
+autorise tous les lieux proposes. `applicationRegionMode: "selected"`
+n'autorise que `applicationRegions`, une liste non vide de regions/localites
+connues. Une liste vide n'est jamais interpretee comme "tout autoriser" dans
+le mode selectionne. Exemple: Developpement Web, mode `selected`, `["Dakar"]`.
+Le super admin et l'admin Competences modifient cette regle dans le formulaire
+du referentiel; aucun changement de code n'est necessaire.
+Les ecritures d'une liste de lieux exigent son mode explicite: un ancien ecran
+doit etre recharge plutot que reinterpreter des exceptions partielles.
+
+Les anciennes exceptions partielles sont converties a la lecture en une liste
+complete, sans elargir ni reduire les autorisations existantes. Le prochain
+enregistrement conserve cette regle explicite. Aucun dossier candidat ni
+historique n'est modifie. Les nouveaux referentiels sont ouverts a tous les
+lieux par defaut; leur nom ne declenche plus d'affectation automatique.
+
+`GET /api/trainings` fournit les lieux dans `regionalRules.residenceRegions`.
+Le formulaire filtre l'offre et le serveur valide cette meme regle avant
+toute nouvelle candidature. Modifier une description ou renommer un
+referentiel ne remet pas ses autorisations a zero.
+
 ## API
 
 `GET /api/trainings` expose seulement les formations publiees.

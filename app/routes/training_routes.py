@@ -7,6 +7,7 @@ from app.services.public_image_service import save_public_image
 from app.services.trainings.catalog import get_catalog
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
+from app.services.trainings.regional_eligibility import regional_rules
 from app.utils.auth_decorators import admin_required
 
 training_bp = Blueprint("training_catalog", __name__)
@@ -14,8 +15,9 @@ MANAGERS = {"super_admin", "competences"}
 service = TrainingCatalogService()
 
 
-def response(data=None, status=200, error=None):
+def response(data=None, status=200, error=None, **metadata):
     payload = {"success": error is None, "error": error} if error else {"success": True, "data": data}
+    payload.update(metadata)
     result = jsonify(payload)
     result.headers["Cache-Control"] = "no-store"
     return result, status
@@ -23,13 +25,13 @@ def response(data=None, status=200, error=None):
 
 @training_bp.route("/trainings", methods=["GET"])
 def public_catalog():
-    return response([item for item in get_catalog() if item["status"] == "published"])
+    return response([item for item in get_catalog() if item["status"] == "published"], regionalRules=regional_rules())
 
 
 @training_bp.route("/admin/trainings", methods=["GET"])
 @admin_required(MANAGERS, allow_interview_members=True)
 def admin_catalog():
-    return response(get_catalog(force=True))
+    return response(get_catalog(force=True), regionalRules=regional_rules())
 
 
 @training_bp.route("/admin/trainings", methods=["POST"])

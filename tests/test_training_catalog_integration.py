@@ -13,6 +13,7 @@ from app.services.tests.formation_catalog import formation_aliases, normalize_fo
 from app.services.trainings.catalog import get_catalog, invalidate_catalog, require_training
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
+from app.services.trainings.regional_eligibility import is_training_allowed
 
 
 @unittest.skipUnless(os.environ.get("TEST_TRAINING_MONGO") == "1", "requires isolated MongoDB on port 27027")
@@ -74,6 +75,18 @@ class TrainingPersistenceTest(unittest.TestCase):
         self.assertEqual("draft", require_training("robotique")["status"])
         with self.assertRaises(TrainingCatalogError):
             require_training("robotique", public=True)
+
+    def test_regional_eligibility_survives_a_database_and_cache_reload(self):
+        row = self.service.create({"title": "Fibre", "durationMonths": 3, "status": "published"})
+        self.assertEqual("all", row["applicationRegionMode"])
+        self.service.update(row["code"], {"version": 1, "applicationRegionMode": "selected", "applicationRegions": ["Dakar"]})
+        invalidate_catalog()
+        reloaded = require_training("fibre", public=True)
+        self.assertEqual(["Dakar"], reloaded["applicationRegions"])
+        self.assertFalse(is_training_allowed(reloaded, "thies"))
+        self.assertFalse(is_training_allowed(reloaded, "Tamba"))
+        self.assertTrue(is_training_allowed(reloaded, "Dakar"))
+        self.assertEqual(1, Training.objects.count())
 
 
 if __name__ == "__main__":

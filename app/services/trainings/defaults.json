@@ -33,7 +33,8 @@
     "status": "published",
     "displayOrder": 10,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": []
   },
   {
     "id": "dev-data",
@@ -67,7 +68,11 @@
     "status": "published",
     "displayOrder": 20,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": [
+      "Thiès",
+      "Diamniadio"
+    ]
   },
   {
     "id": "referent-digital",
@@ -104,7 +109,10 @@
     "status": "published",
     "displayOrder": 30,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": [
+      "Tambacounda"
+    ]
   },
   {
     "id": "hackeuses",
@@ -136,7 +144,8 @@
     "status": "published",
     "displayOrder": 40,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": []
   },
   {
     "id": "aws-cloud",
@@ -169,7 +178,8 @@
     "status": "published",
     "displayOrder": 50,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": []
   },
   {
     "id": "intelligence-artificielle",
@@ -202,7 +212,8 @@
     "status": "published",
     "displayOrder": 60,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": []
   },
   {
     "id": "cyber-security",
@@ -239,6 +250,7 @@
     "status": "published",
     "displayOrder": 70,
     "imageUrl": "",
-    "version": 0
+    "version": 0,
+    "applicationRegions": []
   }
 ]

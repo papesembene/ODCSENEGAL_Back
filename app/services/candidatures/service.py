@@ -15,6 +15,7 @@ from app.utils.request_guards import normalize_email, normalize_phone
 from app.services.trainings.catalog import require_training
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.tests.formation_catalog import formation_values
+from app.services.trainings.regional_eligibility import canonical_region, is_training_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,11 @@ class CandidatureService:
     def submit(self, data):
         self._validate_submission(data)
         training = self._assert_submission_open(data.get("desired_training"))
+        residence = canonical_region(data.get("region_of_residence"))
+        if not residence:
+            raise CandidatureServiceError("Choisissez une région / localité de résidence valide.")
+        if not is_training_allowed(training, residence):
+            raise CandidatureServiceError("Cette formation n'est pas proposée pour votre région / localité de résidence.")
         if training["femaleOnly"] and str(data.get("gender", "")).strip().casefold() not in {"female", "femme", "f", "feminin", "féminin"}:
             raise CandidatureServiceError("Cette formation est réservée aux femmes.")
         email = normalize_email(data["email"])
@@ -95,7 +101,7 @@ class CandidatureService:
             gender=data["gender"],
             cni_or_passport_number=data["cni_or_passport_number"],
             nationality=data["nationality"],
-            region_of_residence=data["region_of_residence"],
+            region_of_residence=residence,
             current_structure=data.get("current_structure", ""),
             education_level=data.get("education_level", ""),
             computer_skills=data["computer_skills"],

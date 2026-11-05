@@ -3,6 +3,7 @@
 from app.repositories.training_repository import TrainingRepository
 from app.services.trainings.catalog import invalidate_catalog, merge_catalog
 from app.services.trainings.schema import TrainingCatalogError, token, training_code, validate_training
+from app.services.trainings.regional_eligibility import with_regional_eligibility
 
 
 class TrainingCatalogService:
@@ -16,6 +17,7 @@ class TrainingCatalogService:
         data = validate_training(payload)
         code = training_code(data["title"])
         data.update(id=code, code=code, value=code, legacyId=None, aliases=[code, data["title"]])
+        data = with_regional_eligibility(data)
         catalog = self.list()
         if any(row["code"] == code for row in catalog):
             raise TrainingCatalogError("Un référentiel utilise déjà cet identifiant.", 409)

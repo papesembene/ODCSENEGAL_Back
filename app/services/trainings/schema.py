@@ -25,12 +25,15 @@ def training_code(title):
 
 TEXT_FIELDS = {"title": 200, "description": 10000, "level": 500, "careers": 3000,
                "location": 300, "startDate": 100, "endDate": 100, "imageUrl": 1000}
-EDITABLE_FIELDS = {*TEXT_FIELDS, "skills", "durationMonths", "femaleOnly", "status", "displayOrder"}
+EDITABLE_FIELDS = {*TEXT_FIELDS, "skills", "durationMonths", "femaleOnly", "status", "displayOrder",
+                   "applicationRegionMode", "applicationRegions"}
 
 
 def validate_training(payload, previous=None):
     if not isinstance(payload, dict):
         raise TrainingCatalogError("Les informations du référentiel sont invalides.")
+    if "applicationRegions" in payload and "applicationRegionMode" not in payload:
+        raise TrainingCatalogError("Actualisez la page avant de modifier les régions / localités de résidence.")
     unknown = set(payload) - EDITABLE_FIELDS - {"version"}
     if unknown:
         raise TrainingCatalogError("Champ non modifiable : " + ", ".join(sorted(unknown)))
@@ -62,4 +65,6 @@ def validate_training(payload, previous=None):
     if data["imageUrl"] and not re.fullmatch(r"/static/uploads/trainings/[A-Za-z0-9_.-]+", data["imageUrl"]):
         raise TrainingCatalogError("Veuillez importer une image depuis le formulaire.")
     data["duration"] = f"{data['durationMonths']} mois"
+    from app.services.trainings.regional_eligibility import validate_residence_policy
+    data.update(validate_residence_policy(data))
     return data
