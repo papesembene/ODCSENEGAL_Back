@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
-param()
+param([switch]$PreservePausedState)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'BackendService.Common.ps1')
 $context=Get-PublishedBackendNssmContext
@@ -12,6 +12,7 @@ $logs=Join-Path $backend 'ops-logs'
 $null=New-Item -ItemType Directory -Path $logs -Force
 $taskName='ODC-TEST-PROD-EMAIL-WORKER'
 $oldTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$wasPaused=$PreservePausedState -and $oldTask -and $oldTask.State -ne 'Running'
 $oldXml=if ($oldTask) { Export-ScheduledTask -TaskName $taskName } else { $null }
 $oldRunner=if (Test-Path -LiteralPath $runner) { [IO.File]::ReadAllText($runner) } else { $null }
 $snapshot=@(Get-CimInstance Win32_Process -ErrorAction Stop)
@@ -50,6 +51,7 @@ $heartbeat=Join-Path $logs 'email-worker.heartbeat'
 $text=$text.Replace('__HEARTBEAT__',$heartbeat)
 $null=[scriptblock]::Create($text)
 $stopFile='C:\Orange Digital Center\ops\backend-recovery\state\email-worker.stop'
+$hadStopFile=Test-Path -LiteralPath $stopFile
 $null=New-Item -ItemType Directory -Path (Split-Path -Parent $stopFile) -Force
 $touched=$false
 try {
@@ -69,7 +71,7 @@ try {
         $current=Get-CimInstance Win32_Process -Filter "ProcessId=$($captured.ProcessId)" -ErrorAction SilentlyContinue
         if ($current -and $current.CreationDate -eq $captured.CreationDate -and $current.ExecutablePath -eq $captured.ExecutablePath) { Stop-Process -Id $current.ProcessId -ErrorAction Stop }
     }
-    Remove-Item -LiteralPath $stopFile -Force
+    if (-not $wasPaused) { Remove-Item -LiteralPath $stopFile -Force }
     [IO.File]::WriteAllText($runner,$text,[Text.UTF8Encoding]::new($false))
     $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $action=New-ScheduledTaskAction -Execute $powershell -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$runner+'"') -WorkingDirectory $backend
@@ -77,6 +79,11 @@ try {
     $principal=New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
     $definition=New-ScheduledTask -Action $action -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $settings -Principal $principal
     Register-ScheduledTask -TaskName $taskName -InputObject $definition -Force | Out-Null
+    if ($wasPaused) {
+        if (-not $oldTask.Settings.Enabled) { Disable-ScheduledTask -TaskName $taskName | Out-Null }
+        Write-Output ('Worker email aligne, pause conservee: '+$backend)
+        return
+    }
     $started=[DateTime]::UtcNow
     Start-ScheduledTask -TaskName $taskName
     $ready=$false
@@ -90,7 +97,8 @@ try {
     Write-Output ('Worker email aligne et redemarre: '+$backend)
 } catch {
     if ($touched) {
-        Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
+        if ($hadStopFile) { $null=New-Item -ItemType File -Path $stopFile -Force }
+        else { Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue }
         $currentTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         $newProcesses=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'python.exe' -and $_.CommandLine -and $_.CommandLine.IndexOf((Join-Path $backend 'email_worker.py'),[StringComparison]::OrdinalIgnoreCase) -ge 0 })
         if ($currentTask -and $currentTask.State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
@@ -101,7 +109,8 @@ try {
         if ($null -ne $oldRunner) { [IO.File]::WriteAllText($runner,$oldRunner,[Text.UTF8Encoding]::new($false)) }
         if ($oldXml) {
             Register-ScheduledTask -TaskName $taskName -Xml $oldXml -Force | Out-Null
-            if ($oldTask.Settings.Enabled) { Start-ScheduledTask -TaskName $taskName }
+            if (-not $oldTask.Settings.Enabled) { Disable-ScheduledTask -TaskName $taskName | Out-Null }
+            elseif (-not $wasPaused) { Start-ScheduledTask -TaskName $taskName }
         } elseif ($currentTask) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
     }
     throw

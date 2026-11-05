@@ -249,7 +249,7 @@ try {
         $null = Assert-BackendOwned $candidateContext
         Assert-BackendReady $port
         $workerTouched = $true
-        & $workerInstaller
+        & $workerInstaller -PreservePausedState
         $committed = $true
 
         try {
@@ -293,7 +293,7 @@ try {
                 Set-Service -Name $active.Name -StartupType $activeStartup
                 if ((Get-Service -Name $active.Name).Status -ne 'Running') { Start-Service -Name $active.Name }
             }
-            if ($workerTouched) { & $workerInstaller }
+            if ($workerTouched) { & $workerInstaller -PreservePausedState }
             if ($candidateTouched) {
                 try {
                     Stop-BackendSlot $candidateName
