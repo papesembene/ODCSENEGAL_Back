@@ -90,8 +90,7 @@ function Get-OdcLiveReferences([string]$Workspace) {
 }
 
 function Get-OdcRetentionPlan {
-    param([string]$Workspace,[string[]]$References,[int]$KeepConfigurations=3)
-    if ($KeepConfigurations -lt 3) { throw 'Keep at least three configuration backups.' }
+    param([string]$Workspace,[string[]]$References,[ValidateRange(0,100)][int]$KeepConfigurations=0)
     $backupRoot=Join-Path $Workspace 'archives\sauvegardes'
     $metadata=@()
     if (Test-Path -LiteralPath $backupRoot) {
@@ -109,13 +108,13 @@ function Get-OdcRetentionPlan {
     foreach ($component in @('backend','frontend')) {
         $ordered=@($metadata | Where-Object { $_.Record.Component -eq $component -and $_.Record.Status -eq 'published' } | Sort-Object Completed -Descending)
         if ($ordered.Count) {
-            foreach ($path in @($ordered[0].Record.CurrentRoot,$ordered[0].Record.PreviousRoot)) {
+            foreach ($path in @($ordered[0].Record.CurrentRoot)) {
                 if ($path) { $protected.Add([string]$path) }
             }
             $oldBackups+=@($ordered | Select-Object -Skip $KeepConfigurations)
         }
         $incomplete=@($metadata | Where-Object { $_.Record.Component -eq $component -and $_.Record.Status -eq 'prepared' } | Sort-Object Completed -Descending)
-        $oldBackups+=@($incomplete | Select-Object -Skip 3)
+        $oldBackups+=@($incomplete | Select-Object -Skip $KeepConfigurations)
     }
     foreach ($directory in @(Get-ChildItem -LiteralPath $Workspace -Directory -Force)) {
         if ($directory.Name -notmatch '^_odc-prod-release-\d{8}-\d{6}-\d{3}$') { continue }
@@ -135,7 +134,7 @@ function Get-OdcRetentionPlan {
         $root=Join-Path $Workspace $relative
         if (-not (Test-Path -LiteralPath $root)) { continue }
         $snapshots=@(Get-ChildItem -LiteralPath $root -Directory | Where-Object { $_.Name -match '^service-watchdog-\d{8}T\d{6,}$' } | Sort-Object Name -Descending)
-        foreach ($snapshot in @($snapshots | Select-Object -Skip 3)) {
+        foreach ($snapshot in @($snapshots | Select-Object -Skip $KeepConfigurations)) {
             if (@($protected | Where-Object { $_.IndexOf($snapshot.FullName,[StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -eq 0) {
                 [pscustomobject]@{Kind='watchdog-configuration';Path=$snapshot.FullName;AllowedRoot=$root}
             }

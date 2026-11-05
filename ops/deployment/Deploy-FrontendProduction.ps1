@@ -194,11 +194,12 @@ try {
     if (-not (Test-FrontendResponse $port).Healthy) { throw 'Le nouveau frontend ne repond plus apres la bascule.' }
     $committed = $true
 
-    # Drain old connections before stopping the old service; preserve its configuration.
+    # Drain old connections, then keep the stopped slot on the current build.
     # Cleanup failure must not undo an already verified public deployment.
     try {
         Set-Service -Name $active.Name -StartupType Manual
         Stop-RetiredFrontend $active.Name
+        Set-FrontendNssmService -ServiceName $active.Name -FrontendPath $release -Port $active.Port
     } catch { Write-Warning "Deploiement termine; ancien service a verifier: $($_.Exception.Message)" }
     Write-Output 'Deploiement frontend reussi: site public HTTP 200.'
     Write-Output "Service: $candidateName ; port: $port ; build: $buildId"

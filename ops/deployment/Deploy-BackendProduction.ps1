@@ -255,6 +255,8 @@ try {
         try {
             Set-Service -Name $active.Name -StartupType Manual
             Stop-RetiredBackend $active.Name
+            # Keep the stopped slot valid without retaining an unused release.
+            Set-BackendNssmService -ServiceName $active.Name -BackendPath $release -Port $active.Port -EnvFile $active.EnvFile
         } catch { Write-Warning "API publiee; ancien service a verifier: $($_.Exception.Message)" }
         Write-Output 'Deploiement API reussi: MongoDB sain, deux acces API publics et frontend HTTP 200.'
         Write-Output "Service: $candidateName ; port: $port"
