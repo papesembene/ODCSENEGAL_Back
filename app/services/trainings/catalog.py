@@ -9,9 +9,9 @@ from pathlib import Path
 from flask import current_app, has_app_context
 
 from app.services.trainings.schema import TrainingCatalogError, token
-from app.services.trainings.regional_eligibility import with_regional_eligibility
+from app.services.trainings.sites import with_site_assignments
 
-DEFAULT_TRAININGS = [with_regional_eligibility(row) for row in
+DEFAULT_TRAININGS = [with_site_assignments(row) for row in
                     json.loads(Path(__file__).with_name("defaults.json").read_text(encoding="utf-8"))]
 _lock = threading.RLock()
 
@@ -20,7 +20,7 @@ def merge_catalog(rows):
     merged = {row["code"]: deepcopy(row) for row in DEFAULT_TRAININGS}
     for row in rows:
         merged[row["code"]] = deepcopy(row)
-    return sorted((with_regional_eligibility(row) for row in merged.values()),
+    return sorted((with_site_assignments(row) for row in merged.values()),
                   key=lambda row: (row["displayOrder"], row["title"].casefold(), row["code"]))
 
 

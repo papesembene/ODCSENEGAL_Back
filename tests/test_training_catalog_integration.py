@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from flask import Flask
@@ -13,7 +14,8 @@ from app.services.tests.formation_catalog import formation_aliases, normalize_fo
 from app.services.trainings.catalog import get_catalog, invalidate_catalog, require_training
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
-from app.services.trainings.regional_eligibility import is_training_allowed
+from app.services.trainings.sites import TrainingSiteService, get_sites, invalidate_sites
+from app.models.training_site import TrainingSite
 
 
 @unittest.skipUnless(os.environ.get("TEST_TRAINING_MONGO") == "1", "requires isolated MongoDB on port 27027")
@@ -27,7 +29,9 @@ class TrainingPersistenceTest(unittest.TestCase):
         cls.addClassCleanup(cls.connection.drop_database, cls.db_name)
 
     def setUp(self):
+        self.connection[self.db_name].drop_collection("candidature")
         Training.drop_collection()
+        TrainingSite.drop_collection()
         self.context = Flask(__name__).app_context()
         self.context.push()
         self.addCleanup(self.context.pop)
@@ -76,17 +80,40 @@ class TrainingPersistenceTest(unittest.TestCase):
         with self.assertRaises(TrainingCatalogError):
             require_training("robotique", public=True)
 
-    def test_regional_eligibility_survives_a_database_and_cache_reload(self):
+    def test_site_assignments_survive_a_database_and_cache_reload(self):
         row = self.service.create({"title": "Fibre", "durationMonths": 3, "status": "published"})
-        self.assertEqual("all", row["applicationRegionMode"])
-        self.service.update(row["code"], {"version": 1, "applicationRegionMode": "selected", "applicationRegions": ["Dakar"]})
+        self.service.update(row["code"], {"version": 1, "siteIds": ["tambacounda"]})
         invalidate_catalog()
         reloaded = require_training("fibre", public=True)
-        self.assertEqual(["Dakar"], reloaded["applicationRegions"])
-        self.assertFalse(is_training_allowed(reloaded, "thies"))
-        self.assertFalse(is_training_allowed(reloaded, "Tamba"))
-        self.assertTrue(is_training_allowed(reloaded, "Dakar"))
+        self.assertEqual(["tambacounda"], reloaded["siteIds"])
         self.assertEqual(1, Training.objects.count())
+
+    def test_sites_can_be_created_renamed_archived_with_concurrency_control(self):
+        sites = TrainingSiteService()
+        site = sites.create({"name": "Saint-Louis"})
+        self.assertEqual(1, TrainingSite.objects.count())
+        sites.update(site["code"], {"version": 1, "name": "ODC Saint-Louis"})
+        with self.assertRaises(TrainingCatalogError):
+            sites.update(site["code"], {"version": 1, "status": "archived"})
+        sites.update(site["code"], {"version": 2, "status": "archived"})
+        invalidate_sites()
+        self.assertEqual("archived", next(item for item in get_sites() if item["code"] == site["code"])["status"])
+
+    def test_admission_persists_site_and_residence_separately_and_preserves_snapshot(self):
+        from app.models.candidature import Candidature
+        from app.services.candidatures.service import CandidatureService
+        from tests.test_candidature_service import CandidatureServiceTest, FakeCampaignService
+        Candidature.drop_collection()
+        payload = {**CandidatureServiceTest._valid_payload(), "training_site": "thies",
+                   "desired_training": "dev-data", "region_of_residence": "Diourbel"}
+        with patch.dict(os.environ, {"EMAIL_DELIVERY_MODE": "disabled"}):
+            saved = CandidatureService(campaign_service=FakeCampaignService()).submit(payload)
+        sites = TrainingSiteService()
+        sites.update("thies", {"version": 0, "name": "ODC Thiès", "status": "archived"})
+        reloaded = Candidature.objects.get(id=saved.id)
+        self.assertEqual("thies", reloaded.training_site)
+        self.assertEqual("Thiès", reloaded.training_site_name)
+        self.assertEqual("Diourbel", reloaded.region_of_residence)
 
 
 if __name__ == "__main__":

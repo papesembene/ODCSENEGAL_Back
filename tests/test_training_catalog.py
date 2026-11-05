@@ -16,6 +16,7 @@ from app.services.tests.formation_catalog import formation_aliases, normalize_fo
 from app.services.trainings.catalog import DEFAULT_TRAININGS, find_training, get_catalog, invalidate_catalog
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
+from app.services.trainings.sites import DEFAULT_SITES
 
 
 class MemoryTrainings:
@@ -36,7 +37,7 @@ class MemoryTrainings:
 class TrainingCatalogTest(unittest.TestCase):
     def setUp(self):
         self.repo = MemoryTrainings()
-        self.service = TrainingCatalogService(self.repo)
+        self.service = TrainingCatalogService(self.repo, site_catalog=lambda **_: deepcopy(DEFAULT_SITES))
 
     def create(self, **overrides):
         return self.service.create({"title": "Robotique", "durationMonths": 6, "status": "published", **overrides})
@@ -147,10 +148,11 @@ class TrainingRoutesTest(unittest.TestCase):
         self.app.register_blueprint(training_bp, url_prefix="/api")
         self.client = self.app.test_client()
         self.repo = MemoryTrainings()
-        self.service = TrainingCatalogService(self.repo)
+        self.service = TrainingCatalogService(self.repo, site_catalog=lambda **_: deepcopy(DEFAULT_SITES))
         self.user = SimpleNamespace(is_admin=True, admin_type="super_admin", profile_data={}, email="admin@example.org")
         for target, value in (("app.routes.training_routes.service", self.service),
                               ("app.routes.training_routes.get_catalog", lambda **_: self.service.list()),
+                              ("app.routes.training_routes.get_sites", lambda **_: deepcopy(DEFAULT_SITES)),
                               ("app.utils.auth_decorators.AuthService.verify_token", lambda _: self.user)):
             patched = patch(target, value)
             patched.start()

@@ -7,12 +7,14 @@ from app.services.public_image_service import save_public_image
 from app.services.trainings.catalog import get_catalog
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
-from app.services.trainings.regional_eligibility import regional_rules
+from app.services.trainings.sites import TrainingSiteService, get_sites
+from app.services.candidatures.residence import RESIDENCE_LOCATIONS
 from app.utils.auth_decorators import admin_required
 
 training_bp = Blueprint("training_catalog", __name__)
 MANAGERS = {"super_admin", "competences"}
 service = TrainingCatalogService()
+site_service = TrainingSiteService()
 
 
 def response(data=None, status=200, error=None, **metadata):
@@ -25,13 +27,49 @@ def response(data=None, status=200, error=None, **metadata):
 
 @training_bp.route("/trainings", methods=["GET"])
 def public_catalog():
-    return response([item for item in get_catalog() if item["status"] == "published"], regionalRules=regional_rules())
+    return response([item for item in get_catalog() if item["status"] == "published"],
+                    trainingSites=[site for site in get_sites() if site["status"] == "active"],
+                    residenceLocations=list(RESIDENCE_LOCATIONS))
 
 
 @training_bp.route("/admin/trainings", methods=["GET"])
 @admin_required(MANAGERS, allow_interview_members=True)
 def admin_catalog():
-    return response(get_catalog(force=True), regionalRules=regional_rules())
+    return response(get_catalog(force=True), trainingSites=get_sites(force=True), residenceLocations=list(RESIDENCE_LOCATIONS))
+
+
+@training_bp.route("/training-sites", methods=["GET"])
+def public_training_sites():
+    return response([site for site in get_sites() if site["status"] == "active"])
+
+
+@training_bp.route("/admin/training-sites", methods=["GET"])
+@admin_required(MANAGERS, allow_interview_members=True)
+def admin_training_sites():
+    return response(get_sites(force=True))
+
+
+@training_bp.route("/admin/training-sites", methods=["POST"])
+@admin_required(MANAGERS)
+def create_training_site():
+    try:
+        return response(site_service.create(request.get_json(silent=True) or {}, g.current_admin.email), 201)
+    except TrainingCatalogError as error:
+        return response(status=error.status_code, error=str(error))
+
+
+@training_bp.route("/admin/training-sites/<code>", methods=["PATCH", "DELETE"])
+@admin_required(MANAGERS)
+def update_training_site(code):
+    try:
+        payload = request.get_json(silent=True) or {}
+        if request.method == "DELETE":
+            if not isinstance(payload, dict):
+                raise TrainingCatalogError("Version du site requise.")
+            payload = {"status": "archived", "version": payload.get("version")}
+        return response(site_service.update(code, payload, g.current_admin.email))
+    except TrainingCatalogError as error:
+        return response(status=error.status_code, error=str(error))
 
 
 @training_bp.route("/admin/trainings", methods=["POST"])

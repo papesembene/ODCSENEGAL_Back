@@ -84,6 +84,7 @@ class CandidatureServiceTest(unittest.TestCase):
             "computer_skills": True,
             "available_for_10_months": True,
             "desired_training": "dev-web-mobile",
+            "training_site": "dakar",
             "accept_conditions": True,
         }
 

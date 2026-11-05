@@ -16,29 +16,31 @@ modifier. Le CM ne gere pas les referentiels.
   suivant les droits existants. Un nouveau referentiel n'herite pas des
   criteres metier de Developpement Web.
 
-## Affectations Selon La Residence
+## Sites Et Residence
 
-Chaque referentiel porte une regle de residence complete, independante de son
-nom et de son lieu physique de formation. `applicationRegionMode: "all"`
-autorise tous les lieux proposes. `applicationRegionMode: "selected"`
-n'autorise que `applicationRegions`, une liste non vide de regions/localites
-connues. Une liste vide n'est jamais interpretee comme "tout autoriser" dans
-le mode selectionne. Exemple: Developpement Web, mode `selected`, `["Dakar"]`.
-Le super admin et l'admin Competences modifient cette regle dans le formulaire
-du referentiel; aucun changement de code n'est necessaire.
-Les ecritures d'une liste de lieux exigent son mode explicite: un ancien ecran
-doit etre recharge plutot que reinterpreter des exceptions partielles.
+La collection `training_sites` gere les lieux de formation. Dakar, Thies,
+Diamniadio / UAM et Tambacounda sont des valeurs initiales sans ecriture sur GET.
+Chaque referentiel declare ses sites dans `siteIds`. Une publication exige
+au moins un site. Les nouvelles affectations sont validees contre ce catalogue.
+Un nouveau site ne recoit pas automatiquement toutes les formations.
 
-Les anciennes exceptions partielles sont converties a la lecture en une liste
-complete, sans elargir ni reduire les autorisations existantes. Le prochain
-enregistrement conserve cette regle explicite. Aucun dossier candidat ni
-historique n'est modifie. Les nouveaux referentiels sont ouverts a tous les
-lieux par defaut; leur nom ne declenche plus d'affectation automatique.
+Le candidat choisit d'abord son site, puis sa formation. Sa residence reste
+une information de contact independante: un resident de Diourbel peut choisir
+Dakar. Le serveur verifie site actif + formation publiee + affectation avant
+toute ecriture. Les anciennes regles `applicationRegions` ne sont plus appliquees
+ni converties en sites. Aucun dossier historique n'est reaffecte.
 
-`GET /api/trainings` fournit les lieux dans `regionalRules.residenceRegions`.
-Le formulaire filtre l'offre et le serveur valide cette meme regle avant
-toute nouvelle candidature. Modifier une description ou renommer un
-referentiel ne remet pas ses autorisations a zero.
+`GET /api/trainings` retourne `trainingSites` et `residenceLocations` en plus
+des formations. Le dossier enregistre `training_site` (code stable) et
+`training_site_name` (nom au moment de la candidature, derive du serveur).
+Les anciens dossiers sans site restent non renseignes. Les filtres pagines
+et exports acceptent `training_site` sans telecharger tous les candidats.
+
+`POST /api/admin/training-sites` ajoute un site. PATCH et DELETE sur
+`/api/admin/training-sites/<code>` exigent sa version. DELETE archive sans
+supprimer les dossiers. Le super admin et l'admin Competences gerent les sites;
+les membres du jury ont seulement acces en lecture. Deployer frontend et
+backend ensemble: le nouveau formulaire envoie obligatoirement `training_site`.
 
 ## API
 

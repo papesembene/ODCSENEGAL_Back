@@ -24,6 +24,8 @@ class Candidature(Document):
     computer_skills = BooleanField(required=True)  # Notions en informatique (Oui/Non)
     available_for_10_months = BooleanField(required=True)  # Disponibilité pour 10 mois (Oui/Non)
     desired_training = StringField(required=True)  # Formation souhaitée
+    training_site = StringField(max_length=80, default="")
+    training_site_name = StringField(max_length=120, default="")
     accept_conditions = BooleanField(required=True)  # Acceptation des conditions
     speciality = StringField()
     is_working = BooleanField(default=False)
@@ -58,6 +60,8 @@ class Candidature(Document):
             {'fields': ['desired_training', '-created_at', '-id']},
             {'fields': ['status', '-created_at', '-id']},
             {'fields': ['desired_training', 'status', '-created_at', '-id']},
+            {'fields': ['training_site', '-created_at', '-id']},
+            {'fields': ['training_site', 'desired_training', '-created_at', '-id']},
         ]
     }
 
@@ -79,6 +83,8 @@ class Candidature(Document):
             'computer_skills': self.computer_skills,
             'available_for_10_months': self.available_for_10_months,
             'desired_training': self.desired_training,
+            'training_site': self.training_site or '',
+            'training_site_name': self.training_site_name or '',
             'accept_conditions': self.accept_conditions,
             'speciality': self.speciality,
             'is_working': self.is_working,

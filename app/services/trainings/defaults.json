@@ -34,7 +34,7 @@
     "displayOrder": 10,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": []
+    "siteIds": ["dakar"]
   },
   {
     "id": "dev-data",
@@ -69,9 +69,8 @@
     "displayOrder": 20,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": [
-      "Thiès",
-      "Diamniadio"
+    "siteIds": [
+      "dakar", "thies", "diamniadio-uam"
     ]
   },
   {
@@ -110,8 +109,8 @@
     "displayOrder": 30,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": [
-      "Tambacounda"
+    "siteIds": [
+      "dakar", "tambacounda"
     ]
   },
   {
@@ -145,7 +144,7 @@
     "displayOrder": 40,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": []
+    "siteIds": ["dakar"]
   },
   {
     "id": "aws-cloud",
@@ -179,7 +178,7 @@
     "displayOrder": 50,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": []
+    "siteIds": ["dakar"]
   },
   {
     "id": "intelligence-artificielle",
@@ -213,7 +212,7 @@
     "displayOrder": 60,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": []
+    "siteIds": ["dakar"]
   },
   {
     "id": "cyber-security",
@@ -251,6 +250,6 @@
     "displayOrder": 70,
     "imageUrl": "",
     "version": 0,
-    "applicationRegions": []
+    "siteIds": ["dakar"]
   }
 ]

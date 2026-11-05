@@ -3,12 +3,13 @@
 from app.repositories.training_repository import TrainingRepository
 from app.services.trainings.catalog import invalidate_catalog, merge_catalog
 from app.services.trainings.schema import TrainingCatalogError, token, training_code, validate_training
-from app.services.trainings.regional_eligibility import with_regional_eligibility
+from app.services.trainings.sites import get_sites, with_site_assignments
 
 
 class TrainingCatalogService:
-    def __init__(self, repository=None):
+    def __init__(self, repository=None, site_catalog=None):
         self.repository = repository or TrainingRepository()
+        self.site_catalog = site_catalog or get_sites
 
     def list(self):
         return merge_catalog(self.repository.list())
@@ -17,7 +18,8 @@ class TrainingCatalogService:
         data = validate_training(payload)
         code = training_code(data["title"])
         data.update(id=code, code=code, value=code, legacyId=None, aliases=[code, data["title"]])
-        data = with_regional_eligibility(data)
+        data = with_site_assignments(data)
+        self._assert_sites(data, payload)
         catalog = self.list()
         if any(row["code"] == code for row in catalog):
             raise TrainingCatalogError("Un référentiel utilise déjà cet identifiant.", 409)
@@ -38,6 +40,7 @@ class TrainingCatalogService:
         if payload["version"] != previous["version"]:
             raise TrainingCatalogError("Ce référentiel a changé. Actualisez avant de réessayer.", 409)
         data = validate_training(payload, previous)
+        self._assert_sites(data, payload)
         data["aliases"] = list(dict.fromkeys([*previous["aliases"], previous["title"], data["title"]]))
         self._assert_aliases_available(data, catalog)
         result = self.repository.save(data, previous["version"], actor)
@@ -46,6 +49,13 @@ class TrainingCatalogService:
 
     def archive(self, code, version, actor=""):
         return self.update(code, {"status": "archived", "version": version}, actor)
+
+    def _assert_sites(self, data, payload):
+        if "siteIds" not in payload:
+            return
+        known = {site["code"] for site in self.site_catalog(force=True)}
+        if set(data["siteIds"]) - known:
+            raise TrainingCatalogError("Un site sélectionné n'existe plus. Actualisez la liste des sites.")
 
     @staticmethod
     def _assert_aliases_available(data, catalog):

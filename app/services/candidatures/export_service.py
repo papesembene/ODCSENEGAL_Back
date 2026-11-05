@@ -10,9 +10,10 @@ from app.repositories.candidature_read_repository import CandidatureReadReposito
 EXPORT_COLUMNS = (
     ("first_name", "Prenom"), ("last_name", "Nom"), ("email", "Email"),
     ("phone", "Telephone"), ("gender", "Genre"), ("desired_training", "Formation"),
+    ("training_site_name", "Site de formation"),
     ("status", "Statut"), ("application_date", "Date de candidature"),
     ("date_of_birth", "Date de naissance"), ("place_of_birth", "Lieu de naissance"),
-    ("nationality", "Nationalite"), ("region_of_residence", "Region"),
+    ("nationality", "Nationalite"), ("region_of_residence", "Region / localite de residence"),
     ("education_level", "Niveau d'etude"), ("current_structure", "Structure actuelle"),
     ("cni_or_passport_number", "CNI / Passeport"), ("computer_skills", "Notions informatiques"),
     ("available_for_10_months", "Disponible 10 mois"), ("accept_conditions", "Conditions acceptees"),

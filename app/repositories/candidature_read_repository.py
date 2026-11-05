@@ -8,7 +8,8 @@ from app.repositories.candidature_filters import candidate_filter
 from app.services.trainings.catalog import find_training, get_catalog
 
 
-PAGE_FIELDS = ("first_name", "last_name", "email", "phone", "gender", "desired_training", "status", "created_at")
+PAGE_FIELDS = ("first_name", "last_name", "email", "phone", "gender", "desired_training", "status", "created_at",
+               "training_site", "training_site_name")
 EMPTY_COUNTS = dict(total=0, femmes=0, hommes=0, acceptes=0, enAttente=0, refuses=0)
 
 

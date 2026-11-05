@@ -112,6 +112,22 @@ class CandidatureQueriesIntegrationTest(unittest.TestCase):
         self.assertEqual(35, len(last["data"]))
         self.assertEqual(1, self.repository.page({"search": "missing", "page": "999"})["pagination"]["page"])
 
+    def test_site_filter_is_paged_exported_and_never_inferred_for_history(self):
+        collection = Candidature._get_collection()
+        collection.update_many({"_id": {"$in": [row["_id"] for row in self.rows[:31]]}},
+                               {"$set": {"training_site": "thies", "training_site_name": "Thiès"}})
+        result = self.repository.page({"training_site": "thies", "per_page": "10"})
+        self.assertEqual(31, result["total"])
+        self.assertEqual(10, len(result["data"]))
+        self.assertTrue(all(row["training_site_name"] == "Thiès" for row in result["data"]))
+        exported = list(csv.reader(StringIO("".join(export_candidates({"training_site": "thies"})).lstrip("\ufeff"))))
+        self.assertEqual(32, len(exported))
+        self.assertIn("Site de formation", exported[0])
+        self.assertEqual(0, self.repository.page({"training_site": "dakar"})["total"])
+        self.assertEqual(235, self.repository.page({})["total"])
+        with self.assertRaises(ValueError):
+            self.repository.page({"training_site": {"$ne": ""}})
+
     def test_statistics_are_global_database_aggregates(self):
         result = self.repository.dashboard()
         self.assertEqual(235, result["stats"]["total"])
@@ -148,13 +164,13 @@ class CandidatureQueriesIntegrationTest(unittest.TestCase):
         ])
         for search in ("  EMILIE   DIOP ", "diop emilie", "EMILIE@EXAMPLE.ORG", "+221771234567", "Evaluation numerique"):
             with self.subTest(search=search):
-                result = TestResultQueries.page({"search": search})
+                result = TestResultQueries.page({"search": search, "campaign_year": "all"})
                 self.assertEqual(1, result["total"])
                 self.assertEqual("emilie@example.org", result["data"][0]["candidate"]["email"])
-        exported = "".join(TestResultQueries.export({"search": "emilie", "per_page": "1"}))
+        exported = "".join(TestResultQueries.export({"search": "emilie", "per_page": "1", "campaign_year": "all"}))
         self.assertIn("emilie@example.org", exported)
         self.assertNotIn("moussa@example.org", exported)
-        self.assertEqual(0, TestResultQueries.page({"search": ".*"})["total"])
+        self.assertEqual(0, TestResultQueries.page({"search": ".*", "campaign_year": "all"})["total"])
         with self.assertRaises(ValueError):
             TestResultQueries.page({"search": "a" * 201})
 
@@ -163,7 +179,7 @@ class CandidatureQueriesIntegrationTest(unittest.TestCase):
         TestSession(testId="local", candidateName="\u00c9milie Diop", candidateEmail="emilie@example.org",
                     candidatePhone="+221 77 123-45-67").save()
         for search in ("diop EMILIE", "+221771234567"):
-            self.assertEqual(1, TestSessionService._build_admin_query({"search": search}).count())
+            self.assertEqual(1, TestSessionService._build_admin_query({"search": search, "campaign_year": "all"}).count())
         with self.assertRaises(TestSessionServiceError):
             TestSessionService._build_admin_query({"search": "a" * 201})
         with patch.object(TestGroupService, "_assigned_candidate_ids", return_value=set()):

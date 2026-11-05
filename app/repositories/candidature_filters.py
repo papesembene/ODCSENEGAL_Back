@@ -2,6 +2,7 @@
 
 from app.services.tests.formation_catalog import formation_aliases
 from app.utils.search import literal_pattern, text_search_filter
+import re
 
 
 SEARCH_FIELDS = ("first_name", "last_name", "email", "phone", "nationality", "pays", "country")
@@ -13,6 +14,11 @@ GENDERS = {
 
 def candidate_filter(filters):
     clauses = []
+    site = filters.get("training_site")
+    if site and site != "all":
+        if not isinstance(site, str) or len(site) > 80 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", site):
+            raise ValueError("Site de formation invalide")
+        clauses.append({"training_site": site})
     formation = filters.get("desired_training")
     if formation and formation != "all":
         aliases = formation_aliases(formation)

@@ -15,7 +15,8 @@ from app.utils.request_guards import normalize_email, normalize_phone
 from app.services.trainings.catalog import require_training
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.tests.formation_catalog import formation_values
-from app.services.trainings.regional_eligibility import canonical_region, is_training_allowed
+from app.services.candidatures.residence import canonical_residence
+from app.services.trainings.sites import require_site
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class CandidatureService:
         "computer_skills",
         "available_for_10_months",
         "desired_training",
+        "training_site",
         "accept_conditions",
     )
     BOOLEAN_FIELDS = {
@@ -70,11 +72,15 @@ class CandidatureService:
     def submit(self, data):
         self._validate_submission(data)
         training = self._assert_submission_open(data.get("desired_training"))
-        residence = canonical_region(data.get("region_of_residence"))
+        residence = canonical_residence(data.get("region_of_residence"))
         if not residence:
             raise CandidatureServiceError("Choisissez une région / localité de résidence valide.")
-        if not is_training_allowed(training, residence):
-            raise CandidatureServiceError("Cette formation n'est pas proposée pour votre région / localité de résidence.")
+        try:
+            site = require_site(data.get("training_site"))
+        except TrainingCatalogError as error:
+            raise CandidatureServiceError(str(error), error.status_code) from error
+        if site["code"] not in training["siteIds"]:
+            raise CandidatureServiceError("Cette formation n'est pas proposée sur le site choisi. Choisissez une autre formation ou un autre site.")
         if training["femaleOnly"] and str(data.get("gender", "")).strip().casefold() not in {"female", "femme", "f", "feminin", "féminin"}:
             raise CandidatureServiceError("Cette formation est réservée aux femmes.")
         email = normalize_email(data["email"])
@@ -107,6 +113,8 @@ class CandidatureService:
             computer_skills=data["computer_skills"],
             available_for_10_months=data["available_for_10_months"],
             desired_training=data["desired_training"],
+            training_site=site["code"],
+            training_site_name=site["name"],
             accept_conditions=data["accept_conditions"],
             speciality=data.get("speciality", ""),
             is_working=data.get("is_working", False),
