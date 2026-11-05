@@ -43,6 +43,9 @@ if MAX_SIGNUPS > 100 and not SYNC_BURST:
     )
 
 FORMATION = os.getenv("ODC_LOAD_FORMATION", "Dev Web")
+SITE = os.getenv("ODC_LOAD_SITE", "dakar").strip()
+if len(SITE) > 80 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", SITE):
+    raise RuntimeError("ODC_LOAD_SITE must be a valid training-site code (for example dakar).")
 RESULT_FILE = Path(
     os.getenv(
         "ODC_LOAD_RESULT_FILE",
@@ -176,6 +179,7 @@ class ProductionRegistrationUser(HttpUser):
             "computer_skills": True,
             "available_for_10_months": True,
             "desired_training": FORMATION,
+            "training_site": SITE,
             "accept_conditions": True,
         }
         record = {
@@ -183,6 +187,7 @@ class ProductionRegistrationUser(HttpUser):
             "index": self.index,
             "email": self.email,
             "identity": self.identity,
+            "training_site": SITE,
         }
         try:
             with self.client.post(

@@ -4,7 +4,7 @@ import tempfile
 import threading
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from requests.exceptions import ConnectTimeout
 
@@ -40,24 +40,29 @@ class ProductionRegistrationLoadTest(unittest.TestCase):
         event.Event = threading.Event
         lock = types.ModuleType("gevent.lock")
         lock.Semaphore = threading.Semaphore
-        runtime = {"locust": locust, "gevent": gevent,
-                   "gevent.event": event, "gevent.lock": lock}
-        environment = {
+        self.runtime = {"locust": locust, "gevent": gevent,
+                        "gevent.event": event, "gevent.lock": lock}
+        self.environment = {
             "ODC_LOAD_RUN_ID": "abcdef012345",
             "ODC_LOAD_EMAILS_PAUSED": "YES",
             "ODC_LOAD_MAX_SIGNUPS": "2",
             "ODC_LOAD_SYNC_BURST": "YES",
+            "ODC_LOAD_SITE": "dakar",
             "ODC_LOAD_RESULT_FILE": str(Path(self.temp.name) / "results.jsonl"),
         }
-        path = Path(__file__).resolve().parents[1] / "load_tests" / "production_registration_locustfile.py"
-        spec = importlib.util.spec_from_file_location("registration_load_under_test", path)
-        self.module = importlib.util.module_from_spec(spec)
-        with patch.dict("sys.modules", runtime), patch.dict("os.environ", environment):
-            spec.loader.exec_module(self.module)
+        self.module = self.load_module()
         self.now = 0.0
         self.module.monotonic = lambda: self.now
         self.gate = ControlledGate()
         self.module._burst_gate = self.gate
+
+    def load_module(self, **environment):
+        path = Path(__file__).resolve().parents[1] / "load_tests" / "production_registration_locustfile.py"
+        spec = importlib.util.spec_from_file_location("registration_load_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict("sys.modules", self.runtime), patch.dict("os.environ", {**self.environment, **environment}):
+            spec.loader.exec_module(module)
+        return module
 
     def user(self, response=None, error=None):
         user = self.module.ProductionRegistrationUser()
@@ -120,6 +125,35 @@ class ProductionRegistrationLoadTest(unittest.TestCase):
         self.assertFalse(self.module._wait_for_burst())
         self.assertEqual(self.module._burst_ready, 0)
         self.assertTrue(self.module._burst_aborted)
+
+    def test_default_or_configured_site_is_submitted_only_once_with_run_identity(self):
+        for site in ("dakar", "thies"):
+            with self.subTest(site=site):
+                self.module = self.load_module(ODC_LOAD_SITE=site)
+                self.module.SYNC_BURST = False
+                self.module._save_result = Mock()
+                preflight = Mock(status_code=200)
+                preflight.json.return_value = {"data": {"isOpen": True}}
+                user = self.user(preflight)
+                response = Mock(status_code=201, error=None)
+                response.json.return_value = {"candidature_id": "synthetic-id", "email_status": "queued"}
+                user.client.post.return_value = MagicMock()
+                user.client.post.return_value.__enter__.return_value = response
+                user.on_start()
+                user.submit_one_synthetic_candidate()
+                user.submit_one_synthetic_candidate()
+                user.client.post.assert_called_once()
+                payload = user.client.post.call_args.kwargs["json"]
+                self.assertEqual(payload["training_site"], site)
+                self.assertEqual(payload["email"], "load-abcdef012345-1@example.invalid")
+                self.assertEqual(payload["cni_or_passport_number"], "LOADTEST-abcdef012345-1")
+                response.success.assert_called_once()
+                self.assertEqual(self.module._save_result.call_args.args[0]["training_site"], site)
+
+    def test_invalid_site_configuration_is_rejected_before_any_request(self):
+        for site in ("", "Dakar", "bad/site", "x" * 81):
+            with self.subTest(site=site), self.assertRaisesRegex(RuntimeError, "ODC_LOAD_SITE"):
+                self.load_module(ODC_LOAD_SITE=site)
 
 
 if __name__ == "__main__":

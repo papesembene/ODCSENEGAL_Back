@@ -11,6 +11,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -85,7 +86,7 @@ def summarize(samples):
     }
 
 
-def candidate(run_id, index):
+def candidate(run_id, index, training_site="dakar"):
     return {
         "first_name": "Charge", "last_name": "Synthetique",
         "email": f"load-{run_id}-{index}@example.org", "phone": "770000000",
@@ -93,6 +94,7 @@ def candidate(run_id, index):
         "cni_or_passport_number": f"LOAD-{run_id}-{index}", "nationality": "Senegalaise",
         "region_of_residence": "Dakar", "computer_skills": True,
         "available_for_10_months": True, "desired_training": "Dev Web", "accept_conditions": True,
+        "training_site": training_site,
     }
 
 
@@ -102,7 +104,7 @@ def journey(base_url, payload, gate):
     with requests.Session() as session:
         session.trust_env = False
         calls = (
-            ("status", "GET", "/api/candidature/status", {"params": {"formation": "Dev Web"}}, 200),
+            ("status", "GET", "/api/candidature/status", {"params": {"formation": payload["desired_training"]}}, 200),
             ("unique", "GET", "/api/candidature/check-unique", {"params": {"field": "email", "value": payload["email"]}}, 200),
             ("apply", "POST", "/api/candidature/apply", {"json": payload}, 201),
         )
@@ -178,6 +180,7 @@ def execute(args):
         "scope": "local API + disposable MongoDB; no IIS/TLS/frontend/Redis/email delivery",
         "logical_cpus": psutil.cpu_count(), "waitress_threads": args.threads,
         "mongo_pool": args.pool, "stages": [], "cleanup_complete": False,
+        "training_site": args.site,
         "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
     report["commit"] = subprocess.check_output(
@@ -243,7 +246,7 @@ def execute(args):
                 # Warm indexes using an actual application before measuring.
                 gate = threading.Event()
                 gate.set()
-                warmup = journey(base_url, candidate(run_id, "warmup"), gate)
+                warmup = journey(base_url, candidate(run_id, "warmup", args.site), gate)
                 if not all(value[2] for value in warmup.values()):
                     raise RuntimeError(f"Warmup failed: {warmup}")
                 measurements = []
@@ -254,7 +257,7 @@ def execute(args):
                     start_sample = len(measurements)
                     gate = threading.Event()
                     with ThreadPoolExecutor(max_workers=level) as pool:
-                        futures = [pool.submit(journey, base_url, candidate(run_id, f"{level}-{index}"), gate)
+                        futures = [pool.submit(journey, base_url, candidate(run_id, f"{level}-{index}", args.site), gate)
                                    for index in range(args.count)]
                         started = time.perf_counter()
                         gate.set()
@@ -304,6 +307,7 @@ def main():
     parser.add_argument("--mongod", type=Path, required=True, help="Existing mongod executable; a new isolated process is started")
     parser.add_argument("--levels", default="10,25,50", help="Increasing concurrency levels (max 100)")
     parser.add_argument("--count", type=int, default=100, help="Candidate journeys per level (max 2000)")
+    parser.add_argument("--site", default="dakar", help="Training-site code for synthetic candidates (default: dakar)")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--pool", type=int, default=50)
     parser.add_argument("--max-p95-ms", type=float, default=1500)
@@ -317,6 +321,8 @@ def main():
         parser.error("levels must be distinct, increasing, between 1 and 100")
     if not max(args.levels) <= args.count <= 2000 or not 1 <= args.threads <= 32 or not 1 <= args.pool <= 100 or not args.max_p95_ms > 0:
         parser.error("invalid count, thread, pool or latency bounds")
+    if len(args.site) > 80 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", args.site):
+        parser.error("site must be a valid training-site code (for example dakar)")
     if not args.mongod.is_file():
         parser.error("mongod executable not found")
     return execute(args)
