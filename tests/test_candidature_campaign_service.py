@@ -30,10 +30,22 @@ class FakeQuery:
                 campaign for campaign in campaigns
                 if campaign.start_at > filters["start_at__gt"]
             ]
+        if "end_at__lt" in filters:
+            campaigns = [
+                campaign for campaign in campaigns
+                if campaign.end_at < filters["end_at__lt"]
+            ]
         return FakeQuery(campaigns)
 
-    def order_by(self, *_fields):
-        return self
+    def order_by(self, *fields):
+        campaigns = self.campaigns
+        for field in reversed(fields):
+            campaigns = sorted(
+                campaigns,
+                key=lambda campaign: getattr(campaign, field.lstrip("-")),
+                reverse=field.startswith("-"),
+            )
+        return FakeQuery(campaigns)
 
     def first(self):
         return self.campaigns[0] if self.campaigns else None
@@ -89,9 +101,62 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
 
         self.assertFalse(status["isOpen"])
         self.assertEqual("upcoming", status["lifecycleStatus"])
+        self.assertEqual("Les candidatures ouvrent bientôt.", status["message"])
+
+    def test_no_published_campaign_announces_opening_without_a_date(self):
+        service = CandidatureCampaignService()
+        with patch(
+            "app.services.candidatures.campaign_service.CandidatureCampaign.objects",
+            return_value=FakeQuery([]),
+        ):
+            status = service.get_public_status()
+            with self.assertRaises(CandidatureCampaignServiceError) as raised:
+                service.assert_open()
+
+        self.assertFalse(status["isOpen"])
+        self.assertEqual("upcoming", status["lifecycleStatus"])
+        self.assertIsNone(status["campaign"])
+        self.assertEqual("Les candidatures ouvrent bientôt.", status["message"])
+        self.assertEqual(403, raised.exception.status_code)
+
+    def test_expired_campaign_stays_closed_instead_of_announcing_a_new_opening(self):
+        service = CandidatureCampaignService()
+        old = self._campaign(datetime(2026, 5, 1), datetime(2026, 5, 20))
+        recent = self._campaign(datetime(2026, 6, 1), datetime(2026, 6, 20))
+        with patch(
+            "app.services.candidatures.campaign_service.datetime",
+            SimpleNamespace(utcnow=lambda: datetime(2026, 7, 8, 10)),
+        ), patch(
+            "app.services.candidatures.campaign_service.CandidatureCampaign.objects",
+            return_value=FakeQuery([old, recent]),
+        ):
+            status = service.get_public_status()
+            with self.assertRaises(CandidatureCampaignServiceError):
+                service.assert_open()
+
+        self.assertFalse(status["isOpen"])
+        self.assertEqual("closed", status["lifecycleStatus"])
+        self.assertEqual(recent.end_at.isoformat(), status["campaign"]["endAt"])
+
+    def test_next_published_campaign_takes_priority_over_the_expired_one(self):
+        old = self._campaign(datetime(2026, 6, 1), datetime(2026, 6, 20))
+        upcoming = self._campaign(datetime(2026, 7, 15), datetime(2026, 7, 20))
+        with patch(
+            "app.services.candidatures.campaign_service.datetime",
+            SimpleNamespace(utcnow=lambda: datetime(2026, 7, 8, 10)),
+        ), patch(
+            "app.services.candidatures.campaign_service.CandidatureCampaign.objects",
+            return_value=FakeQuery([old, upcoming]),
+        ):
+            status = CandidatureCampaignService().get_public_status()
+
+        self.assertEqual("upcoming", status["lifecycleStatus"])
+        self.assertEqual(upcoming.start_at.isoformat(), status["campaign"]["startAt"])
 
     @staticmethod
     def _campaign(start_at, end_at):
+        now = datetime(2026, 7, 8, 10)
+        lifecycle = "upcoming" if start_at > now else "closed" if end_at < now else "open"
         return SimpleNamespace(
             id="campaign-id",
             title="Promotion 2026",
@@ -105,7 +170,7 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
             updated_by="",
             created_at=start_at,
             updated_at=start_at,
-            lifecycle_status=lambda now=None: "open" if start_at <= datetime(2026, 7, 8, 10) <= end_at else "upcoming",
+            lifecycle_status=lambda now=None: lifecycle,
             to_dict=lambda now=None: {
                 "id": "campaign-id",
                 "title": "Promotion 2026",
@@ -114,8 +179,8 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
                 "startAt": start_at.isoformat(),
                 "endAt": end_at.isoformat(),
                 "status": "published",
-                "lifecycleStatus": "open" if start_at <= datetime(2026, 7, 8, 10) <= end_at else "upcoming",
-                "isOpen": start_at <= datetime(2026, 7, 8, 10) <= end_at,
+                "lifecycleStatus": lifecycle,
+                "isOpen": lifecycle == "open",
                 "description": "",
             },
         )

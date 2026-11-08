@@ -45,8 +45,8 @@ class CandidatureCampaignService:
         if not campaign:
             return {
                 "isOpen": False,
-                "lifecycleStatus": "closed",
-                "message": "Les candidatures ne sont pas encore ouvertes.",
+                "lifecycleStatus": "upcoming",
+                "message": "Les candidatures ouvrent bientôt.",
                 "campaign": None,
             }
 
@@ -131,14 +131,18 @@ class CandidatureCampaignService:
         if open_campaign:
             return open_campaign
 
-        return query.filter(start_at__gt=now).order_by("start_at").first()
+        next_campaign = query.filter(start_at__gt=now).order_by("start_at").first()
+        if next_campaign:
+            return next_campaign
+
+        return query.filter(end_at__lt=now).order_by("-end_at").first()
 
     @staticmethod
     def _status_message(status):
         if status["lifecycleStatus"] == "open":
             return "Les candidatures sont ouvertes."
         if status["lifecycleStatus"] == "upcoming":
-            return "Les candidatures ouvriront prochainement."
+            return "Les candidatures ouvrent bientôt."
         return "Les candidatures sont fermées."
 
     @staticmethod
