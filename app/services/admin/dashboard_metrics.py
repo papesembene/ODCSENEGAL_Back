@@ -45,7 +45,7 @@ class DashboardMetricsService:
             )
             if competences
             else 0,
-            "growth": self._growth(now),
+            "application_variation": self._application_variation(now),
         }
 
     def trend(self, now, days):
@@ -111,7 +111,7 @@ class DashboardMetricsService:
             },
         }
 
-    def _growth(self, now):
+    def _application_variation(self, now):
         this_month = datetime(now.year, now.month, 1)
         previous_month = (
             datetime(now.year - 1, 12, 1)
@@ -119,15 +119,15 @@ class DashboardMetricsService:
             else datetime(now.year, now.month - 1, 1)
         )
         current = Candidature.objects(
-            created_at__gte=this_month
+            created_at__gte=this_month,
+            created_at__lt=now,
         ).count()
+        comparison_end = min(previous_month + (now - this_month), this_month)
         previous = Candidature.objects(
             created_at__gte=previous_month,
-            created_at__lt=this_month,
+            created_at__lt=comparison_end,
         ).count()
-        if previous:
-            return round((current - previous) / previous * 100, 0)
-        return 100 if current else 0
+        return current - previous
 
     def _formations(self):
         pipeline = [

@@ -33,7 +33,7 @@ class AdminDashboardService:
                 "testsProgrammes": totals["scheduled_tests"],
                 "evenementsAVenir": totals["upcoming_events"],
                 "tauxAcceptation": int(totals["acceptance_rate"]),
-                "croissance": int(totals["growth"]),
+                "variationCandidatures": int(totals["application_variation"]),
             },
             "applicationsTrend": self.metrics.trend(now, days),
             "genderDistribution": self._safe(
@@ -74,7 +74,7 @@ class AdminDashboardService:
                     "testsProgrammes": 0,
                     "evenementsAVenir": 0,
                     "tauxAcceptation": 0,
-                    "croissance": 0,
+                    "variationCandidatures": 0,
                 },
                 "applicationsTrend": [],
                 "genderDistribution": [],
