@@ -3,6 +3,7 @@
 import threading
 import time
 from copy import deepcopy
+from datetime import datetime, timezone
 
 from flask import current_app, has_app_context
 
@@ -10,6 +11,7 @@ from app.services.trainings.schema import TrainingCatalogError, token, training_
 
 DEFAULT_SITES = [
     {"code": code, "name": name, "description": "", "status": "active", "displayOrder": index * 10,
+     "applicationDeadline": "",
      "aliases": [code, name], "version": 0}
     for index, (code, name) in enumerate([
         ("dakar", "Dakar"), ("thies", "Thiès"), ("diamniadio-uam", "Diamniadio / UAM"),
@@ -44,11 +46,31 @@ def get_sites(force=False):
         return deepcopy(items)
 
 
-def require_site(code):
+def require_site(code, now=None):
     site = next((row for row in get_sites() if row["code"] == code and row["status"] == "active"), None)
     if not site:
         raise TrainingCatalogError("Ce site de formation n'est plus disponible. Choisissez un autre site.")
+    if not site_application_open(site, now=now):
+        raise TrainingCatalogError("Les inscriptions pour ce site sont clôturées. Choisissez un autre site encore ouvert.", 403)
     return site
+
+
+def site_application_open(site, now=None):
+    deadline = site.get("applicationDeadline")
+    if not deadline:
+        return True
+    try:
+        closes_at = datetime.strptime(deadline, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc) < closes_at
+
+
+def public_site(site):
+    return {**deepcopy(site), "applicationOpen": site_application_open(site)}
 
 
 def with_site_assignments(training):
@@ -74,7 +96,9 @@ def validate_site_ids(values, published=False):
 
 
 def validate_site(payload, previous=None):
-    if not isinstance(payload, dict) or set(payload) - {"name", "description", "status", "displayOrder", "version"}:
+    if not isinstance(payload, dict) or set(payload) - {
+        "name", "description", "status", "displayOrder", "applicationDeadline", "version"
+    }:
         raise TrainingCatalogError("Les informations du site sont invalides.")
     data = {**(previous or {}), **{key: value for key, value in payload.items() if key != "version"}}
     for field, limit in (("name", 120), ("description", 500)):
@@ -91,6 +115,17 @@ def validate_site(payload, previous=None):
     if type(order) is not int or not 0 <= order <= 10000:
         raise TrainingCatalogError("L'ordre du site doit être compris entre 0 et 10000.")
     data["displayOrder"] = order
+    deadline = data.get("applicationDeadline", "")
+    if deadline is None:
+        deadline = ""
+    if not isinstance(deadline, str) or (deadline and len(deadline) != 16):
+        raise TrainingCatalogError("La date limite doit être une date et une heure valides (heure de Dakar).")
+    if deadline:
+        try:
+            datetime.strptime(deadline, "%Y-%m-%dT%H:%M")
+        except ValueError as error:
+            raise TrainingCatalogError("La date limite doit être une date et une heure valides (heure de Dakar).") from error
+    data["applicationDeadline"] = deadline
     return data
 
 

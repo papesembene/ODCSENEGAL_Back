@@ -1,6 +1,6 @@
 """Use cases for public and administrative candidatures."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import os
 
@@ -76,7 +76,10 @@ class CandidatureService:
         if not residence:
             raise CandidatureServiceError("Choisissez une région / localité de résidence valide.")
         try:
-            site = require_site(data.get("training_site"))
+            now = self.now()
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=timezone.utc)
+            site = require_site(data.get("training_site"), now=now)
         except TrainingCatalogError as error:
             raise CandidatureServiceError(str(error), error.status_code) from error
         if site["code"] not in training["siteIds"]:

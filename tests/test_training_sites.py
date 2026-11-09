@@ -2,6 +2,7 @@
 
 import unittest
 from copy import deepcopy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,7 +10,13 @@ from flask import Flask
 
 from app.routes.training_routes import training_bp
 from app.routes.candidature_routes import candidature_public_bp
-from app.services.trainings.sites import DEFAULT_SITES, TrainingSiteService, with_site_assignments
+from app.services.trainings.sites import (
+    DEFAULT_SITES,
+    TrainingSiteService,
+    site_application_open,
+    validate_site,
+    with_site_assignments,
+)
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
 from app.services.trainings.catalog import DEFAULT_TRAININGS
@@ -70,6 +77,32 @@ class TrainingSitesTest(unittest.TestCase):
         with self.assertRaises(TrainingCatalogError):
             self.sites.create({"name": "THIES"})
         self.assertEqual("archived", self.sites.update(created["code"], {"version": 2, "status": "archived"})["status"])
+
+    def test_site_deadline_is_optional_validated_and_enforced_at_submission(self):
+        deadline = "2026-11-09T12:00"
+        site = {**DEFAULT_SITES[3], "applicationDeadline": deadline}
+        self.assertEqual(deadline, validate_site({"name": "Tamba", "applicationDeadline": deadline})["applicationDeadline"])
+        self.assertEqual("", validate_site({"name": "Tamba", "applicationDeadline": None})["applicationDeadline"])
+        for invalid in ("2026-02-30T12:00", "2026-11-09", "pas-une-date"):
+            with self.subTest(deadline=invalid), self.assertRaises(TrainingCatalogError):
+                validate_site({"name": "Tamba", "applicationDeadline": invalid})
+
+        before = datetime(2026, 11, 9, 11, 59, tzinfo=timezone.utc)
+        at_deadline = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+        self.assertTrue(site_application_open(site, before))
+        self.assertFalse(site_application_open(site, at_deadline))
+
+        service = CandidatureService(
+            repository=self.candidates,
+            now=lambda: at_deadline,
+            campaign_service=FakeCampaignService(),
+        )
+        payload = {**CandidatureServiceTest._valid_payload(),
+                   "training_site": "tambacounda", "desired_training": "referent-digital"}
+        with patch("app.services.trainings.sites.get_sites", return_value=[site]):
+            with self.assertRaisesRegex(CandidatureServiceError, "inscriptions.*clôturées"):
+                service.submit(payload)
+        self.assertIsNone(self.candidates.created)
 
     def test_admin_can_change_assignments_without_changing_residence(self):
         row = self.trainings.update("dev-web-mobile", {"version": 0, "siteIds": ["thies"]})

@@ -7,7 +7,7 @@ from app.services.public_image_service import save_public_image
 from app.services.trainings.catalog import get_catalog
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.trainings.service import TrainingCatalogService
-from app.services.trainings.sites import TrainingSiteService, get_sites
+from app.services.trainings.sites import TrainingSiteService, get_sites, public_site
 from app.services.candidatures.residence import RESIDENCE_LOCATIONS
 from app.utils.auth_decorators import admin_required
 
@@ -28,7 +28,7 @@ def response(data=None, status=200, error=None, **metadata):
 @training_bp.route("/trainings", methods=["GET"])
 def public_catalog():
     return response([item for item in get_catalog() if item["status"] == "published"],
-                    trainingSites=[site for site in get_sites() if site["status"] == "active"],
+                    trainingSites=[public_site(site) for site in get_sites() if site["status"] == "active"],
                     residenceLocations=list(RESIDENCE_LOCATIONS))
 
 
@@ -40,7 +40,7 @@ def admin_catalog():
 
 @training_bp.route("/training-sites", methods=["GET"])
 def public_training_sites():
-    return response([site for site in get_sites() if site["status"] == "active"])
+    return response([public_site(site) for site in get_sites() if site["status"] == "active"])
 
 
 @training_bp.route("/admin/training-sites", methods=["GET"])

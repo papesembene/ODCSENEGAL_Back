@@ -42,6 +42,13 @@ supprimer les dossiers. Le super admin et l'admin Competences gerent les sites;
 les membres du jury ont seulement acces en lecture. Deployer frontend et
 backend ensemble: le nouveau formulaire envoie obligatoirement `training_site`.
 
+Chaque site peut definir `applicationDeadline` au format `YYYY-MM-DDTHH:mm`,
+interprete en heure de Dakar. Sans date, seule la cloture generale de la
+campagne s'applique. L'API publique expose aussi `applicationOpen`; le formulaire
+affiche l'echeance ou signale que le site est ferme. Le backend revalide cette
+date au moment de l'envoi et refuse une candidature tardive, meme si la requete
+contourne le formulaire.
+
 ## API
 
 `GET /api/trainings` expose seulement les formations publiees.
