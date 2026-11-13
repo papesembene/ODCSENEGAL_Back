@@ -67,7 +67,7 @@ try {
     Set-BackendIisTextAtomic $apiConfig ($oldApi.Replace($oldApiUrl,$newApiUrl)); $apiChanged=$true
     foreach ($url in @('https://api.orangedigitalcenter.sn/health','https://orangedigitalcenter.sn/api/health')) {
         $health=Invoke-RestMethod -Uri $url -TimeoutSec 15
-        if ($health.status -ne 'healthy' -or $health.environment -ne 'production' -or $health.dependencies.mongodb.status -ne 'up') { throw 'Public API health check failed.' }
+        if ($health.status -ne 'healthy' -or $health.dependencies.mongodb.status -ne 'up') { throw 'Public API health check failed.' }
     }
     $code=& curl.exe -sS -o NUL -w '%{http_code}' --max-time 15 https://orangedigitalcenter.sn/
     if ($LASTEXITCODE -ne 0 -or $code -ne '200') { throw 'Public frontend check failed.' }

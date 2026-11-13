@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from app.services.contact_service import ContactService
 
@@ -15,7 +15,6 @@ def contact():
     try:
         contact_service.send(request.get_json() or {})
         return jsonify({"message": "Message envoyé avec succès"}), 200
-    except Exception as error:
-        return jsonify({
-            "error": f"Échec de l'envoi de l'email: {error}",
-        }), 500
+    except Exception:
+        current_app.logger.exception("Echec de traitement du formulaire de contact")
+        return jsonify({"error": "Impossible d'envoyer le message pour le moment. Veuillez réessayer."}), 500

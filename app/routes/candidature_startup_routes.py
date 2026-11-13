@@ -68,8 +68,9 @@ def check_email():
         return jsonify({"error": "Email requis"}), 400
     try:
         return jsonify({"exists": _service().email_exists(email)})
-    except Exception as error:
-        return jsonify({"error": str(error)}), 500
+    except Exception:
+        current_app.logger.exception("Echec de verification email startup")
+        return jsonify({"error": "Service momentanément indisponible. Veuillez réessayer."}), 500
 
 
 @startup_bp.route("/check-phone", methods=["GET"])
@@ -89,8 +90,9 @@ def check_phone():
         return jsonify({"error": "Téléphone requis"}), 400
     try:
         return jsonify({"exists": _service().phone_exists(phone)})
-    except Exception as error:
-        return jsonify({"error": str(error)}), 500
+    except Exception:
+        current_app.logger.exception("Echec de verification telephone startup")
+        return jsonify({"error": "Service momentanément indisponible. Veuillez réessayer."}), 500
 
 
 @startup_bp.route("/submit", methods=["GET", "POST"])
@@ -195,5 +197,6 @@ def list_startups():
                 "startups": startups,
             }
         ), 200
-    except Exception as error:
-        return jsonify({"error": str(error)}), 500
+    except Exception:
+        current_app.logger.exception("Echec de chargement de la liste startups")
+        return jsonify({"error": "Service momentanément indisponible. Veuillez réessayer."}), 500

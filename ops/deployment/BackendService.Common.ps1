@@ -132,7 +132,9 @@ function Test-BackendHealth {
         catch [Net.WebException] { if ($_.Exception.Response) { $response=$_.Exception.Response } else { throw } }
         $reader = [IO.StreamReader]::new($response.GetResponseStream())
         try { $body = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
-        if ($body.service -ne 'candidatures-api' -or $body.environment -ne 'production') { throw 'Unexpected health response.' }
+        # Service identity and production environment are validated by Get-BackendNssmContext.
+        if ($body.status -notin @('healthy','degraded') -or
+            -not $body.dependencies.PSObject.Properties['mongodb']) { throw 'Unexpected health response.' }
         $dependencies = @($body.dependencies.PSObject.Properties)
         $up = ($dependencies.Count -gt 0 -and @($dependencies | Where-Object { $_.Value.status -ne 'up' }).Count -eq 0)
         [pscustomobject]@{ Responsive=$true; DependencyHealthy=$up; Healthy=([int]$response.StatusCode -eq 200 -and $body.status -eq 'healthy' -and $up); Detail=("HTTP $([int]$response.StatusCode); status=$($body.status)") }

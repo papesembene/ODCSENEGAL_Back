@@ -45,6 +45,9 @@ class ObservabilityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "healthy")
+        self.assertNotIn("hostname", response.get_json())
+        self.assertNotIn("environment", response.get_json())
+        self.assertNotIn("apm_enabled", response.get_json())
         self.assertEqual(
             response.get_json()["dependencies"]["mongodb"]["status"],
             "up",

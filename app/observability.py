@@ -5,7 +5,6 @@ import json
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import os
-import socket
 import time
 import uuid
 
@@ -114,7 +113,7 @@ class RequestContextFilter(logging.Filter):
 def configure_observability(app):
     log_dir = os.getenv("LOG_DIR", "logs")
     logger = _configure_logging(log_dir)
-    apm_enabled = _configure_apm(app, logger)
+    _configure_apm(app, logger)
     ignored_paths = {"/health", "/api/health", "/metrics", "/favicon.ico"}
 
     @app.before_request
@@ -185,14 +184,6 @@ def configure_observability(app):
         return {
             "status": "healthy" if healthy else "degraded",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "service": "candidatures-api",
-            "version": os.getenv("APP_VERSION", "1.0.0"),
-            "hostname": socket.gethostname(),
-            "environment": app.config.get(
-                "ENVIRONMENT",
-                "development",
-            ),
-            "apm_enabled": apm_enabled,
             "dependencies": dependencies,
         }, 200 if healthy else 503
 

@@ -91,8 +91,9 @@ def apply():
         candidature = candidature_service.submit(data)
     except CandidatureServiceError as error:
         return candidature_error_response(error)
-    except Exception as error:
-        return jsonify(error=f"Erreur inconnue : {error}"), 500
+    except Exception:
+        logger.exception("Echec inattendu de l'enregistrement d'une candidature")
+        return jsonify(error="Une erreur est survenue lors de l'enregistrement. Veuillez réessayer."), 500
 
     return jsonify(
         message="Candidature enregistrée avec succès",

@@ -54,9 +54,10 @@ function Assert-PublicBackendHealth([string]$Url) {
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
         try {
             $result = Invoke-RestMethod -Uri $Url -TimeoutSec 10
-            if ($result.status -eq 'healthy' -and $result.environment -eq 'production' -and
+            # Production environment and service ownership are checked privately by Assert-BackendOwned.
+            if ($result.status -eq 'healthy' -and
                 $result.dependencies.mongodb.status -eq 'up') { return }
-            $lastDetail = 'Statut de production ou dependance MongoDB non sain.'
+            $lastDetail = 'Statut API ou dependance MongoDB non sain.'
         } catch { $lastDetail = $_.Exception.Message }
         Start-Sleep -Seconds 1
     }
