@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
-param()
+param([switch]$SkipCleanup)
 
 $ErrorActionPreference = 'Stop'
 $source = 'C:\Orange Digital Center\odc-test\frontend'
@@ -207,10 +207,16 @@ try {
     Write-Output 'Configuration de secours temporaire creee pour ce deploiement.'
     try {
         Save-OdcPublishedDeployment -Component frontend -ReleaseRoot $releaseRoot -PreviousPath $active.Frontend -BackupDirectory $backupDir
-        & $cleanup
+        if ($SkipCleanup) {
+            Write-Output 'Nettoyage des anciennes versions ignore (-SkipCleanup).'
+        } else {
+            & $cleanup
+        }
     } catch { Write-Warning ('Frontend publie; nettoyage differe: '+$_.Exception.Message) }
     finally {
-        if (Test-Path -LiteralPath $backupDir -PathType Container) {
+        if ($SkipCleanup) {
+            Write-Output "Configuration de secours temporaire conservee (-SkipCleanup): $backupDir"
+        } elseif (Test-Path -LiteralPath $backupDir -PathType Container) {
             try {
                 Remove-OdcTreeNoFollow -Path $backupDir -AllowedRoot 'C:\Orange Digital Center\archives\sauvegardes'
                 Write-Output 'Configuration de secours temporaire supprimee apres validation.'

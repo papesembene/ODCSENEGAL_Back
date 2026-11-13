@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
-param()
+param([switch]$SkipCleanup)
 
 $ErrorActionPreference = 'Stop'
 $source = 'C:\Orange Digital Center\odc-test\backend'
@@ -265,10 +265,16 @@ try {
         Write-Output 'Worker email aligne sur cette release.'
         try {
             Save-OdcPublishedDeployment -Component backend -ReleaseRoot $releaseRoot -PreviousPath $active.Backend -BackupDirectory $backupDir
-            & $cleanup
+            if ($SkipCleanup) {
+                Write-Output 'Nettoyage des anciennes versions ignore (-SkipCleanup).'
+            } else {
+                & $cleanup
+            }
         } catch { Write-Warning ('API et worker publies; nettoyage differe: '+$_.Exception.Message) }
         finally {
-            if (Test-Path -LiteralPath $backupDir -PathType Container) {
+            if ($SkipCleanup) {
+                Write-Output "Sauvegarde temporaire conservee (-SkipCleanup): $backupDir"
+            } elseif (Test-Path -LiteralPath $backupDir -PathType Container) {
                 try {
                     Remove-OdcTreeNoFollow -Path $backupDir -AllowedRoot 'C:\Orange Digital Center\archives\sauvegardes'
                     Write-Output 'Sauvegarde temporaire supprimee apres validation.'
