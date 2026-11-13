@@ -14,6 +14,7 @@ class Candidature(Document):
     email = StringField(required=True, unique=True)
     phone = StringField(required=True)
     date_of_birth = DateField(required=True)
+    identity_fingerprint = StringField(unique=True, sparse=True)
     place_of_birth = StringField(required=True)
     gender = StringField(required=True)
     cni_or_passport_number = StringField(required=True, unique=True)
@@ -47,6 +48,7 @@ class Candidature(Document):
         'indexes': [
             'email',
             'phone',
+            {'fields': ['phone', 'date_of_birth']},
             'cni_or_passport_number',
             'desired_training',
             'status',

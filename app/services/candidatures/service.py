@@ -1,6 +1,6 @@
 """Use cases for public and administrative candidatures."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import logging
 import os
 
@@ -11,7 +11,12 @@ from app.services.candidatures.campaign_service import (
     CandidatureCampaignService,
     CandidatureCampaignServiceError,
 )
-from app.utils.request_guards import normalize_email, normalize_phone
+from app.utils.request_guards import (
+    candidature_identity_fingerprint,
+    normalize_candidate_name,
+    normalize_email,
+    normalize_phone,
+)
 from app.services.trainings.catalog import require_training
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.tests.formation_catalog import formation_values
@@ -70,7 +75,10 @@ class CandidatureService:
         self.campaign_service = campaign_service or CandidatureCampaignService()
 
     def submit(self, data):
-        self._validate_submission(data)
+        now = self.now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        birth_date = self._validate_submission(data, today=now.date())
         training = self._assert_submission_open(data.get("desired_training"))
         residence = canonical_residence(data.get("region_of_residence"))
         if not residence:
@@ -88,6 +96,8 @@ class CandidatureService:
             raise CandidatureServiceError("Cette formation est réservée aux femmes.")
         email = normalize_email(data["email"])
         phone = normalize_phone(data["phone"])
+        first_name = data["first_name"].strip()
+        last_name = data["last_name"].strip()
 
         if self.repository.find_by_email(email):
             raise CandidatureServiceError(
@@ -100,12 +110,34 @@ class CandidatureService:
                 "Un utilisateur avec ce numéro CNI/passeport existe déjà",
             )
 
+        normalized_first_name = normalize_candidate_name(first_name)
+        normalized_last_name = normalize_candidate_name(last_name)
+        possible_duplicates = self.repository.find_by_phone_and_birth_date(
+            phone,
+            birth_date,
+        )
+        if any(
+            normalize_candidate_name(candidate.first_name) == normalized_first_name
+            and normalize_candidate_name(candidate.last_name) == normalized_last_name
+            for candidate in possible_duplicates
+        ):
+            raise CandidatureServiceError(
+                "Une candidature existe déjà pour cette personne. Une seule candidature est autorisée, quelle que soit la formation ou la pièce utilisée.",
+                409,
+            )
+
         candidature = self.repository.create(
-            first_name=data["first_name"],
-            last_name=data["last_name"],
+            first_name=first_name,
+            last_name=last_name,
+            identity_fingerprint=candidature_identity_fingerprint(
+                phone,
+                birth_date,
+                first_name,
+                last_name,
+            ),
             email=email,
             phone=phone,
-            date_of_birth=data["date_of_birth"],
+            date_of_birth=birth_date,
             place_of_birth=data["place_of_birth"],
             gender=data["gender"],
             cni_or_passport_number=data["cni_or_passport_number"],
@@ -136,8 +168,7 @@ class CandidatureService:
             return saved
         except NotUniqueError as error:
             raise CandidatureServiceError(
-                "Une candidature avec cet email ou ce numéro de pièce "
-                "existe déjà",
+                "Une candidature existe déjà pour ces coordonnées ou cette identité.",
                 409,
             ) from error
 
@@ -245,7 +276,7 @@ class CandidatureService:
         except ValueError as error:
             raise CandidatureServiceError(str(error), 400) from error
 
-    def _validate_submission(self, data):
+    def _validate_submission(self, data, today=None):
         if not isinstance(data, dict) or not data:
             raise CandidatureServiceError("Données manquantes")
         for field in self.REQUIRED_FIELDS:
@@ -264,6 +295,22 @@ class CandidatureService:
                 )
             elif not isinstance(data[field], str) or len(data[field]) > 4096:
                 raise CandidatureServiceError(f"Le champ {field} doit être un texte valide")
+
+        try:
+            birth_date = date.fromisoformat(data["date_of_birth"])
+        except (TypeError, ValueError) as error:
+            raise CandidatureServiceError(
+                "La date de naissance doit être une date valide au format AAAA-MM-JJ.",
+            ) from error
+        if data["date_of_birth"] != birth_date.isoformat():
+            raise CandidatureServiceError(
+                "La date de naissance doit être une date valide au format AAAA-MM-JJ.",
+            )
+        if birth_date > (today or datetime.now(timezone.utc).date()):
+            raise CandidatureServiceError(
+                "La date de naissance ne peut pas être dans le futur.",
+            )
+        return birth_date
 
     @staticmethod
     def _status_counts(query):

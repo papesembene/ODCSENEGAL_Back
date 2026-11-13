@@ -1,5 +1,9 @@
 import re
 import time
+import unicodedata
+import hashlib
+import hmac
+import os
 from collections import defaultdict
 from threading import Lock
 from app.utils.shared_rate_limit import shared_rate_limited
@@ -18,6 +22,26 @@ def normalize_email(value):
 
 def normalize_phone(value):
     return re.sub(r"[^\d+]", "", (value or "").strip())
+
+
+def normalize_candidate_name(value):
+    normalized = unicodedata.normalize("NFKD", (value or "").casefold())
+    normalized = "".join(
+        character for character in normalized
+        if not unicodedata.combining(character)
+    )
+    return " ".join(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
+
+
+def candidature_identity_fingerprint(phone, birth_date, first_name, last_name):
+    secret = os.getenv("CANDIDATURE_IDENTITY_SECRET") or os.getenv("SECRET_KEY", "dev_key")
+    identity = "\x1f".join((
+        normalize_phone(phone),
+        birth_date.isoformat(),
+        normalize_candidate_name(first_name),
+        normalize_candidate_name(last_name),
+    ))
+    return hmac.new(secret.encode("utf-8"), identity.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def login_credentials(data):

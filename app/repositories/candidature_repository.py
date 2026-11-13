@@ -32,6 +32,15 @@ class CandidatureRepository:
         ).only("id").first()
 
     @staticmethod
+    def find_by_phone_and_birth_date(phone, birth_date):
+        return list(
+            Candidature.objects(
+                phone=phone,
+                date_of_birth=birth_date,
+            ).only("id", "first_name", "last_name")
+        )
+
+    @staticmethod
     def list_filtered(filters, search="", page=None, per_page=None):
         query = Candidature.objects(__raw__=candidate_filter({**filters, "search": search}))
         query = query.order_by("-created_at", "-id")

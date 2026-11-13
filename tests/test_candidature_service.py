@@ -13,12 +13,16 @@ class FakeRepository:
         self.created = None
         self.email_exists = False
         self.identity_exists = False
+        self.possible_duplicates = []
 
     def find_by_email(self, _email):
         return self.email_exists
 
     def find_by_identity_number(self, _identity):
         return self.identity_exists
+
+    def find_by_phone_and_birth_date(self, _phone, _birth_date):
+        return self.possible_duplicates
 
     def create(self, **values):
         self.created = SimpleNamespace(id="candidate-id", **values)
@@ -67,6 +71,39 @@ class CandidatureServiceTest(unittest.TestCase):
             "email existe déjà",
         ):
             self.service.submit(self._valid_payload())
+
+    def test_submit_rejects_same_person_with_new_email_and_document(self):
+        self.repository.possible_duplicates = [SimpleNamespace(
+            first_name="Moussa",
+            last_name="Bà",
+        )]
+        payload = self._valid_payload()
+        payload["email"] = "moussa.new@example.com"
+        payload["cni_or_passport_number"] = "A12345678"
+        payload["desired_training"] = "dev-data"
+        payload["first_name"] = "  MOUSSA  "
+        payload["last_name"] = "Ba"
+
+        with self.assertRaisesRegex(CandidatureServiceError, "Une candidature existe déjà"):
+            self.service.submit(payload)
+
+    def test_submit_allows_shared_phone_and_birth_date_for_a_different_name(self):
+        self.repository.possible_duplicates = [SimpleNamespace(
+            first_name="Awa",
+            last_name="Ba",
+        )]
+
+        candidate = self.service.submit(self._valid_payload())
+
+        self.assertEqual("Moussa", candidate.first_name)
+
+    def test_submit_rejects_invalid_or_future_birth_date(self):
+        for birth_date in ("2001-02-29", "2026-06-26", "25/06/2000"):
+            with self.subTest(birth_date=birth_date):
+                payload = self._valid_payload()
+                payload["date_of_birth"] = birth_date
+                with self.assertRaisesRegex(CandidatureServiceError, "date de naissance"):
+                    self.service.submit(payload)
 
     @staticmethod
     def _valid_payload():
