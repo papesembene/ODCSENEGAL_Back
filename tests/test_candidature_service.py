@@ -53,6 +53,14 @@ class CandidatureServiceTest(unittest.TestCase):
         self.assertEqual("moussa@example.com", candidate.email)
         self.assertEqual("+221771234567", candidate.phone)
 
+    def test_administrative_age_filter_does_not_reject_older_registrations(self):
+        payload = self._valid_payload()
+        payload["date_of_birth"] = "1990-01-01"
+
+        candidate = self.service.submit(payload)
+
+        self.assertEqual("1990-01-01", candidate.date_of_birth.isoformat())
+
     def test_submit_requires_real_booleans(self):
         payload = self._valid_payload()
         payload["accept_conditions"] = "true"

@@ -136,6 +136,7 @@ def get_all_candidatures():
             desired_training=request.args.get("desired_training"),
             status=request.args.get("status"),
             search=request.args.get("search", ""),
+            eligibility=request.args.get("eligibility"),
         )
         return jsonify({"success": True, **result}), 200
     except ValueError as error:

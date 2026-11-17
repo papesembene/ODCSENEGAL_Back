@@ -1,6 +1,7 @@
 """Literal, accent-insensitive filters shared by candidate pages and exports."""
 
 from app.services.tests.formation_catalog import formation_aliases
+from app.utils.candidate_eligibility import age_eligibility_filter
 from app.utils.search import literal_pattern, text_search_filter
 import re
 
@@ -14,6 +15,9 @@ GENDERS = {
 
 def candidate_filter(filters):
     clauses = []
+    eligibility = age_eligibility_filter(filters.get("eligibility"))
+    if eligibility:
+        clauses.append(eligibility)
     site = filters.get("training_site")
     if site and site != "all":
         if not isinstance(site, str) or len(site) > 80 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", site):

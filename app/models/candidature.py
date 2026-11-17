@@ -48,6 +48,7 @@ class Candidature(Document):
         'indexes': [
             'email',
             'phone',
+            'date_of_birth',
             {'fields': ['phone', 'date_of_birth']},
             'cni_or_passport_number',
             'desired_training',

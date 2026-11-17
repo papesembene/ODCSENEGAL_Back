@@ -208,8 +208,11 @@ class CandidatureService:
         search="",
         page=None,
         per_page=None,
+        eligibility=None,
     ):
         filters = {}
+        if eligibility is not None:
+            filters["eligibility"] = eligibility
         if desired_training and desired_training != "all":
             filters["desired_training"] = desired_training
         if status and status != "all":
