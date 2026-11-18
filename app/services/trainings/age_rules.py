@@ -6,8 +6,8 @@ import unicodedata
 
 
 AGE_PREFIX = r"\bage(?:e|\s*\(\s*e\s*\))?\s+de\s*"
-RANGE = re.compile(AGE_PREFIX + r"(\d{1,3})\s*a\s*(\d{1,3})\s*ans?\b")
-OVER = re.compile(r"(?:" + AGE_PREFIX + r")?(?:\bplus\s+de|\+\s*de)\s*(\d{1,3})\s*ans?\b")
+RANGE = re.compile(AGE_PREFIX + r"([0-9]{1,3})\s*a\s*([0-9]{1,3})\s*ans?\b")
+OVER = re.compile(r"(?:" + AGE_PREFIX + r")?(?:\bplus\s+de|\+\s*de)\s*([0-9]{1,3})\s*ans?\b")
 AGE_WORD = re.compile(r"\bage(?:e|\s*\(\s*e\s*\))?\b")
 
 

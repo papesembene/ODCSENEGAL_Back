@@ -26,7 +26,8 @@ class TrainingAgeRulesTest(unittest.TestCase):
         for text in (None, "", "Bac + 2 / BTS", "Entre 18 et 30", "18 à 30 ans", "Agé de 40 à 25 ans",
                      "Agé de 18 à 130 ans", "Agé de -1 à 30 ans", "plus de 180 ans", "pas plus de 18 ans",
                      "au plus de 18 ans", "non âgé de 18 à 30 ans", "Agé de 18 à 30 ans ou âgé de 25 à 40 ans",
-                     "Agé de 18 à 30 ans / âge minimum inconnu", "Agé de 18 à 30 ans / plus de 25 ans"):
+                     "Agé de 18 à 30 ans / âge minimum inconnu", "Agé de 18 à 30 ans / plus de 25 ans",
+                     "Agé de ١٨ à ٣٠ ans"):
             with self.subTest(text=text):
                 self.assertIsNone(parse_age_rule(text))
 
