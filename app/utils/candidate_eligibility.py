@@ -1,7 +1,14 @@
-"""Age eligibility predicates for candidate reads, without changing registrations."""
+"""Read-only age eligibility from the current, editable training catalogue."""
 
-from calendar import monthrange
+from calendar import isleap, monthrange
+from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
+
+from bson.regex import Regex
+
+from app.services.trainings.age_rules import parse_age_rule
+from app.services.trainings.schema import token
+from app.utils.search import literal_pattern
 
 
 ELIGIBILITY_VALUES = frozenset({"all", "eligible", "ineligible", "unknown"})
@@ -12,30 +19,86 @@ def utc_today():
     return datetime.now(timezone.utc).date()
 
 
-def age_eligibility_filter(value=None, *, today=None):
-    """Classify stored birth dates by calendar age < 30 on the given UTC day."""
+def birthday_cutoff(today, years):
+    year = today.year - years
+    return today.replace(year=year, day=min(today.day, monthrange(year, today.month)[1]))
+
+
+def midnight(day):
+    return datetime.combine(day, time.min, timezone.utc)
+
+
+def rule_bounds(rule, today):
+    """Return an inclusive lower/exclusive upper DOB interval for one age rule."""
+    if rule.kind == "range":
+        return (midnight(birthday_cutoff(today, rule.max_age + 1) + timedelta(days=1)),
+                midnight(birthday_cutoff(today, rule.min_age) + timedelta(days=1)))
+    cutoff = birthday_cutoff(today, rule.min_age)
+    # Feb-29 birthdays use Mar-1 when their anniversary year is not a leap year.
+    if (today.month, today.day) == (2, 29) and not isleap(cutoff.year):
+        cutoff += timedelta(days=1)
+    elif (today.month, today.day) == (3, 1) and not isleap(today.year) and isleap(cutoff.year):
+        cutoff -= timedelta(days=1)
+    return None, midnight(cutoff)
+
+
+def formation_patterns_by_rule(catalog):
+    owners, rules = defaultdict(set), {}
+    for index, training in enumerate(catalog):
+        rules[index] = parse_age_rule(training.get("level"))
+        aliases = training.get("aliases", [])
+        aliases = aliases if isinstance(aliases, (list, tuple)) else []
+        for value in [training.get("code"), training.get("value"), training.get("title"), *aliases]:
+            if isinstance(value, str) and (alias := token(value)):
+                owners[alias].add(index)
+    grouped = defaultdict(list)
+    for alias, indexes in sorted(owners.items()):
+        if len(indexes) != 1:
+            continue
+        rule = rules[next(iter(indexes))]
+        if rule is not None:
+            # Match the catalogue token convention across case, accents and separators.
+            separator = r"[^\p{L}\p{N}]"
+            pattern = "^" + separator + "*" + (separator + "+").join(
+                literal_pattern(part) for part in alias.split()) + separator + "*$"
+            grouped[rule].append(Regex(pattern, "i"))
+    return grouped
+
+
+def age_eligibility_filter(value=None, *, today=None, catalog=None):
+    """Build per-referential age predicates; absent policy never invents a rule."""
     if value is None or value == "all":
         return {}
     if not isinstance(value, str) or value not in ELIGIBILITY_VALUES:
         raise ValueError("Filtre d'éligibilité invalide")
 
+    if catalog is None:
+        # Import lazily: the catalogue itself is used while other filters are imported.
+        from app.services.trainings.catalog import get_catalog
+        catalog = get_catalog()
     today = today or utc_today()
-    tomorrow = datetime.combine(today + timedelta(days=1), time.min, timezone.utc)
-    if value == "unknown":
-        return {"$or": [
-            {"date_of_birth": {"$not": {"$type": "date"}}},
-            {"date_of_birth": {"$type": "array"}},
-            {"date_of_birth": {"$type": "date", "$lt": MIN_BIRTH_DATE}},
-            {"date_of_birth": {"$type": "date", "$gte": tomorrow}},
-        ]}
-
-    year = today.year - 30
-    cutoff = today.replace(year=year, day=min(today.day, monthrange(year, today.month)[1]))
-    younger_than_thirty = datetime.combine(cutoff + timedelta(days=1), time.min, timezone.utc)
+    grouped = formation_patterns_by_rule(catalog)
     # Query $type also matches dates inside arrays; only scalar BSON dates are valid.
-    bounds = {"$type": "date", "$not": {"$type": "array"}, "$gte": MIN_BIRTH_DATE}
-    if value == "eligible":
-        bounds.update({"$gte": younger_than_thirty, "$lt": tomorrow})
-    else:
-        bounds["$lt"] = younger_than_thirty
-    return {"date_of_birth": bounds}
+    valid = {"$type": "date", "$not": {"$type": "array"}, "$gte": MIN_BIRTH_DATE,
+             "$lt": midnight(today + timedelta(days=1))}
+    all_patterns = [pattern for patterns in grouped.values() for pattern in patterns]
+    if not all_patterns:
+        return {} if value == "unknown" else {"_id": {"$in": []}}
+    known = {"desired_training": {"$type": "string", "$not": {"$type": "array"}, "$in": all_patterns}}
+    if value == "unknown":
+        return {"$or": [{"$nor": [{"date_of_birth": valid}]}, {"$nor": [known]}]}
+    branches = []
+    for rule, patterns in grouped.items():
+        formation = {"desired_training": {"$type": "string", "$not": {"$type": "array"}, "$in": patterns}}
+        lower, upper = rule_bounds(rule, today)
+        if value == "eligible":
+            dates = {**valid, "$lt": upper}
+            if lower is not None:
+                dates["$gte"] = lower
+            branches.append({"$and": [formation, {"date_of_birth": dates}]})
+        else:
+            outside = [{"date_of_birth": {"$gte": upper}}]
+            if lower is not None:
+                outside.append({"date_of_birth": {"$lt": lower}})
+            branches.append({"$and": [formation, {"date_of_birth": valid}, {"$or": outside}]})
+    return {"$or": branches}

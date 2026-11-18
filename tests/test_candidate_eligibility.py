@@ -1,6 +1,7 @@
 """Age filters are calendar-based read predicates, including unknown legacy dates."""
 
 from datetime import date, datetime, timezone
+from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -10,10 +11,17 @@ from flask import Flask
 from app.repositories.candidature_filters import candidate_filter
 from app.routes.candidature_routes import candidature_bp
 from app.services.candidatures.service import CandidatureService
-from app.utils.candidate_eligibility import age_eligibility_filter, utc_today
+from app.services.trainings.age_rules import AgeRule
+from app.utils.candidate_eligibility import age_eligibility_filter, rule_bounds, utc_today
+from age_rule_fixtures import CATALOG
 
 
 class CandidateEligibilityTest(unittest.TestCase):
+    def setUp(self):
+        catalog = patch("app.services.trainings.catalog.get_catalog", return_value=deepcopy(CATALOG))
+        catalog.start()
+        self.addCleanup(catalog.stop)
+
     def test_absent_and_all_preserve_the_existing_unfiltered_read(self):
         self.assertEqual({}, age_eligibility_filter())
         self.assertEqual({}, age_eligibility_filter("all"))
@@ -24,39 +32,53 @@ class CandidateEligibilityTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "éligibilité"):
                 age_eligibility_filter(value, today=date(2026, 11, 17))
 
-    def test_birthday_boundaries_use_whole_utc_calendar_days(self):
+    def test_inclusive_range_covers_the_entire_maximum_completed_age(self):
         today = date(2026, 11, 17)
-        eligible = age_eligibility_filter("eligible", today=today)["date_of_birth"]
-        ineligible = age_eligibility_filter("ineligible", today=today)["date_of_birth"]
-        self.assertEqual(datetime(1996, 11, 18, tzinfo=timezone.utc), eligible["$gte"])
-        self.assertEqual(datetime(2026, 11, 18, tzinfo=timezone.utc), eligible["$lt"])
-        self.assertEqual(eligible["$gte"], ineligible["$lt"])
-        self.assertEqual(datetime(1, 1, 1, tzinfo=timezone.utc), ineligible["$gte"])
-        self.assertEqual("date", eligible["$type"])
-        self.assertEqual({"$type": "array"}, eligible["$not"])
-        self.assertNotIn("$expr", repr(eligible))
+        self.assertEqual((datetime(1985, 11, 18, tzinfo=timezone.utc), datetime(2001, 11, 18, tzinfo=timezone.utc)),
+                         rule_bounds(AgeRule("range", 25, 40), today))
+        query = age_eligibility_filter("eligible", today=today, catalog=[CATALOG[0]])
+        bounds = query["$or"][0]["$and"][1]["date_of_birth"]
+        self.assertEqual(datetime(1995, 11, 18, tzinfo=timezone.utc), bounds["$gte"])
+        self.assertEqual(datetime(2008, 11, 18, tzinfo=timezone.utc), bounds["$lt"])
+        self.assertEqual("date", bounds["$type"])
+        self.assertEqual({"$type": "array"}, bounds["$not"])
+        self.assertNotIn("$expr", repr(query))
 
-    def test_february_29_birthdays_reach_thirty_on_march_1_in_nonleap_year(self):
-        february = age_eligibility_filter("eligible", today=date(2026, 2, 28))["date_of_birth"]
-        march = age_eligibility_filter("eligible", today=date(2026, 3, 1))["date_of_birth"]
-        self.assertEqual(datetime(1996, 2, 29, tzinfo=timezone.utc), february["$gte"])
-        self.assertEqual(datetime(1996, 3, 2, tzinfo=timezone.utc), march["$gte"])
+    def test_strict_over_eighteen_starts_the_day_after_the_eighteenth_birthday(self):
+        self.assertEqual((None, datetime(2008, 11, 17, tzinfo=timezone.utc)),
+                         rule_bounds(AgeRule("over", 18), date(2026, 11, 17)))
 
-    def test_today_february_29_handles_nonleap_cutoff_year(self):
-        bounds = age_eligibility_filter("eligible", today=date(2024, 2, 29))["date_of_birth"]
-        self.assertEqual(datetime(1994, 3, 1, tzinfo=timezone.utc), bounds["$gte"])
-        self.assertEqual(datetime(2024, 3, 1, tzinfo=timezone.utc), bounds["$lt"])
+    def test_strict_over_leap_anniversaries_roll_to_march_1_without_waiting_until_nineteen(self):
+        self.assertEqual((None, datetime(2010, 3, 1, tzinfo=timezone.utc)),
+                         rule_bounds(AgeRule("over", 18), date(2028, 2, 29)))
+        self.assertEqual((None, datetime(2008, 2, 29, tzinfo=timezone.utc)),
+                         rule_bounds(AgeRule("over", 18), date(2026, 3, 1)))
+        self.assertEqual((None, datetime(2008, 3, 2, tzinfo=timezone.utc)),
+                         rule_bounds(AgeRule("over", 18), date(2026, 3, 2)))
 
     def test_unknown_includes_non_dates_arrays_and_future_dates(self):
         query = age_eligibility_filter("unknown", today=date(2026, 11, 17))
-        self.assertIn({"date_of_birth": {"$not": {"$type": "date"}}}, query["$or"])
-        self.assertIn({"date_of_birth": {"$type": "array"}}, query["$or"])
-        self.assertIn({"date_of_birth": {
-            "$type": "date", "$lt": datetime(1, 1, 1, tzinfo=timezone.utc),
-        }}, query["$or"])
-        self.assertIn({"date_of_birth": {
-            "$type": "date", "$gte": datetime(2026, 11, 18, tzinfo=timezone.utc),
-        }}, query["$or"])
+        valid = query["$or"][0]["$nor"][0]["date_of_birth"]
+        self.assertEqual({"$type": "array"}, valid["$not"])
+        self.assertEqual("date", valid["$type"])
+        self.assertEqual(datetime(1, 1, 1, tzinfo=timezone.utc), valid["$gte"])
+        self.assertEqual(datetime(2026, 11, 18, tzinfo=timezone.utc), valid["$lt"])
+        self.assertIn("desired_training", query["$or"][1]["$nor"][0])
+
+    def test_no_age_policy_never_invents_a_fallback(self):
+        catalog = [CATALOG[-1]]
+        self.assertEqual({}, age_eligibility_filter("unknown", catalog=catalog))
+        for value in ("eligible", "ineligible"):
+            self.assertEqual({"_id": {"$in": []}}, age_eligibility_filter(value, catalog=catalog))
+
+    def test_policy_is_read_from_current_editable_metadata(self):
+        catalog = deepcopy(CATALOG[:1])
+        original = age_eligibility_filter("eligible", today=date(2026, 11, 17), catalog=catalog)
+        catalog[0]["level"] = "Bac / Agé de 25 à 40 ans"
+        changed = age_eligibility_filter("eligible", today=date(2026, 11, 17), catalog=catalog)
+        self.assertNotEqual(original, changed)
+        self.assertEqual(datetime(1985, 11, 18, tzinfo=timezone.utc),
+                         changed["$or"][0]["$and"][1]["date_of_birth"]["$gte"])
 
     def test_default_day_comes_from_utc_clock(self):
         with patch("app.utils.candidate_eligibility.datetime") as clock:
@@ -68,7 +90,7 @@ class CandidateEligibilityTest(unittest.TestCase):
         with patch("app.utils.candidate_eligibility.utc_today", return_value=date(2026, 11, 17)):
             query = candidate_filter({"eligibility": "eligible", "status": "accepted", "search": "Awa"})
         self.assertEqual(3, len(query["$and"]))
-        self.assertEqual(datetime(1996, 11, 18, tzinfo=timezone.utc), query["$and"][0]["date_of_birth"]["$gte"])
+        self.assertIn("$or", query["$and"][0])
         self.assertIn({"status": "accepted"}, query["$and"])
 
     def test_bulk_service_uses_same_filter_for_rows_and_count(self):
