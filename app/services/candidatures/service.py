@@ -18,6 +18,7 @@ from app.utils.request_guards import (
     normalize_phone,
 )
 from app.services.trainings.catalog import require_training
+from app.services.trainings.age_rules import midnight, parse_age_rule, rule_bounds
 from app.services.trainings.schema import TrainingCatalogError
 from app.services.tests.formation_catalog import formation_values
 from app.services.candidatures.residence import canonical_residence
@@ -78,8 +79,10 @@ class CandidatureService:
         now = self.now()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
+        now = now.astimezone(timezone.utc)
         birth_date = self._validate_submission(data, today=now.date())
         training = self._assert_submission_open(data.get("desired_training"))
+        self._assert_age_eligible(training, birth_date, now.date())
         residence = canonical_residence(data.get("region_of_residence"))
         if not residence:
             raise CandidatureServiceError("Choisissez une région / localité de résidence valide.")
@@ -87,6 +90,7 @@ class CandidatureService:
             now = self.now()
             if now.tzinfo is None:
                 now = now.replace(tzinfo=timezone.utc)
+            now = now.astimezone(timezone.utc)
             site = require_site(data.get("training_site"), now=now)
         except TrainingCatalogError as error:
             raise CandidatureServiceError(str(error), error.status_code) from error
@@ -171,6 +175,21 @@ class CandidatureService:
                 "Une candidature existe déjà pour ces coordonnées ou cette identité.",
                 409,
             ) from error
+
+    @staticmethod
+    def _assert_age_eligible(training, birth_date, today):
+        rule = parse_age_rule(training.get("level"))
+        if rule is None:
+            return
+        lower, upper = rule_bounds(rule, today)
+        birth = midnight(birth_date)
+        if (lower is None or birth >= lower) and birth < upper:
+            return
+        title = training.get("title")
+        prefix = f"Pour la formation « {title.strip()} »" if isinstance(title, str) and title.strip() else "Pour cette formation"
+        condition = (f"entre {rule.min_age} et {rule.max_age} ans inclus" if rule.kind == "range"
+                     else f"plus de {rule.min_age} ans")
+        raise CandidatureServiceError(f"{prefix}, vous devez avoir {condition} à la date d'inscription.", 400)
 
     def _assert_submission_open(self, desired_training):
         try:

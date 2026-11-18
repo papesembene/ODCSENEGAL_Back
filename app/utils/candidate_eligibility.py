@@ -1,12 +1,11 @@
 """Read-only age eligibility from the current, editable training catalogue."""
 
-from calendar import isleap, monthrange
 from collections import defaultdict
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from bson.regex import Regex
 
-from app.services.trainings.age_rules import parse_age_rule
+from app.services.trainings.age_rules import midnight, parse_age_rule, rule_bounds
 from app.services.trainings.schema import token
 from app.utils.search import literal_pattern
 
@@ -17,29 +16,6 @@ MIN_BIRTH_DATE = datetime(1, 1, 1, tzinfo=timezone.utc)
 
 def utc_today():
     return datetime.now(timezone.utc).date()
-
-
-def birthday_cutoff(today, years):
-    year = today.year - years
-    return today.replace(year=year, day=min(today.day, monthrange(year, today.month)[1]))
-
-
-def midnight(day):
-    return datetime.combine(day, time.min, timezone.utc)
-
-
-def rule_bounds(rule, today):
-    """Return an inclusive lower/exclusive upper DOB interval for one age rule."""
-    if rule.kind == "range":
-        return (midnight(birthday_cutoff(today, rule.max_age + 1) + timedelta(days=1)),
-                midnight(birthday_cutoff(today, rule.min_age) + timedelta(days=1)))
-    cutoff = birthday_cutoff(today, rule.min_age)
-    # Feb-29 birthdays use Mar-1 when their anniversary year is not a leap year.
-    if (today.month, today.day) == (2, 29) and not isleap(cutoff.year):
-        cutoff += timedelta(days=1)
-    elif (today.month, today.day) == (3, 1) and not isleap(today.year) and isleap(cutoff.year):
-        cutoff -= timedelta(days=1)
-    return None, midnight(cutoff)
 
 
 def formation_patterns_by_rule(catalog):

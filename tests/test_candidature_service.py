@@ -1,7 +1,11 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
+from flask import Flask
+
+from app.routes.candidature_routes import candidature_public_bp
 from app.services.candidatures.service import (
     CandidatureService,
     CandidatureServiceError,
@@ -53,13 +57,73 @@ class CandidatureServiceTest(unittest.TestCase):
         self.assertEqual("moussa@example.com", candidate.email)
         self.assertEqual("+221771234567", candidate.phone)
 
-    def test_administrative_age_filter_does_not_reject_older_registrations(self):
-        payload = self._valid_payload()
-        payload["date_of_birth"] = "1990-01-01"
+    def test_current_age_rules_are_enforced_per_program_before_writes(self):
+        cases = [
+            ("startup-school", "Agé de 25 à 40 ans", "1991-06-25", True),
+            ("startup-school", "Agé de 25 à 40 ans", "2002-06-25", False),
+            ("startup-school", "Agé de 25 à 40 ans", "2001-06-25", True),
+            ("startup-school", "Agé de 25 à 40 ans", "1986-06-25", True),
+            ("startup-school", "Agé de 25 à 40 ans", "1985-06-26", True),
+            ("startup-school", "Agé de 25 à 40 ans", "1985-06-25", False),
+            ("tech-broadband", "Agé de 18 à 40 ans", "1991-06-25", True),
+            ("tech-broadband", "Agé de 18 à 40 ans", "2008-06-25", True),
+            ("tech-broadband", "Agé de 18 à 40 ans", "2008-06-26", False),
+            ("tech-broadband", "Agé de 18 à 40 ans", "1986-06-25", True),
+            ("tech-broadband", "Agé de 18 à 40 ans", "1985-06-25", False),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1991-06-25", False),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1996-06-25", True),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1995-06-26", True),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1995-06-25", False),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "2008-06-25", True),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "2008-06-26", False),
+            ("hackeuses", "Agée de + de 18 ans", "2008-06-25", False),
+            ("hackeuses", "Agée de + de 18 ans", "2008-06-24", True),
+            ("hackeuses", "Agée de + de 18 ans", "1946-06-25", True),
+        ]
+        for code, level, birth, allowed in cases:
+            with self.subTest(code=code, birth=birth):
+                repository = Mock(wraps=FakeRepository())
+                service = CandidatureService(repository=repository, now=self.service.now, campaign_service=FakeCampaignService())
+                payload = {**self._valid_payload(), "desired_training": code, "date_of_birth": birth}
+                with patch("app.services.trainings.catalog.get_catalog", return_value=[self._training(code, level)]):
+                    if allowed:
+                        self.assertEqual(birth, service.submit(payload).date_of_birth.isoformat())
+                        repository.create.assert_called_once()
+                        repository.save.assert_called_once()
+                    else:
+                        with self.assertRaisesRegex(CandidatureServiceError, "à la date d'inscription") as error:
+                            service.submit(payload)
+                        self.assertEqual(400, error.exception.status_code)
+                        repository.create.assert_not_called()
+                        repository.save.assert_not_called()
 
-        candidate = self.service.submit(payload)
+    def test_missing_or_ambiguous_policy_never_invents_a_registration_restriction(self):
+        for level in ("Bac + 2 / BTS", "", "Agé de 18 à 30 ans ou âgé de 25 à 40 ans"):
+            with self.subTest(level=level), patch("app.services.trainings.catalog.get_catalog", return_value=[
+                self._training("cyber-security", level),
+            ]):
+                for birth in ("1990-01-01", "2009-01-01"):
+                    self.repository.created = None
+                    payload = {**self._valid_payload(), "desired_training": "cyber-security", "date_of_birth": birth}
+                    self.assertEqual(birth, self.service.submit(payload).date_of_birth.isoformat())
 
-        self.assertEqual("1990-01-01", candidate.date_of_birth.isoformat())
+    def test_submission_uses_utc_day_even_when_injected_clock_has_an_offset(self):
+        with patch("app.services.trainings.catalog.get_catalog", return_value=[
+            self._training("dev-web-mobile", "Agé de 18 à 30 ans"),
+        ]):
+            self.service.now = lambda: datetime(2026, 6, 26, 0, 30, tzinfo=timezone(timedelta(hours=2)))
+            payload = {**self._valid_payload(), "date_of_birth": "2008-06-26"}
+            with self.assertRaisesRegex(CandidatureServiceError, "entre 18 et 30 ans inclus"):
+                self.service.submit(payload)
+            self.assertIsNone(self.repository.created)
+            self.service.now = lambda: datetime(2026, 6, 24, 23, 30, tzinfo=timezone(timedelta(hours=-3)))
+            payload["date_of_birth"] = "2008-06-25"
+            self.assertEqual("2008-06-25", self.service.submit(payload).date_of_birth.isoformat())
+
+    @staticmethod
+    def _training(code, level):
+        return {"code": code, "value": code, "title": code, "aliases": [], "level": level,
+                "status": "published", "siteIds": ["dakar"], "femaleOnly": False}
 
     def test_submit_requires_real_booleans(self):
         payload = self._valid_payload()
@@ -132,6 +196,45 @@ class CandidatureServiceTest(unittest.TestCase):
             "training_site": "dakar",
             "accept_conditions": True,
         }
+
+
+class CandidatureAgeRegistrationHttpTest(unittest.TestCase):
+    def setUp(self):
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(candidature_public_bp, url_prefix="/api/candidature")
+        self.http = app.test_client()
+
+    def test_public_api_rejects_outside_published_rule_and_accepts_inclusive_endpoints(self):
+        for code, level, birth, status in (
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1991-06-25", 400),
+            ("startup-school", "Agé de 25 à 40 ans", "2002-06-25", 400),
+            ("dev-web-mobile", "Agé de 18 à 30 ans", "1996-06-25", 201),
+            ("startup-school", "Agé de 25 à 40 ans", "1986-06-25", 201),
+        ):
+            with self.subTest(code=code, birth=birth):
+                repository = Mock(wraps=FakeRepository())
+                service = CandidatureService(repository=repository, now=lambda: datetime(2026, 6, 25, 8),
+                                             campaign_service=FakeCampaignService())
+                payload = {**CandidatureServiceTest._valid_payload(), "desired_training": code, "date_of_birth": birth}
+                with patch("app.services.trainings.catalog.get_catalog", return_value=[
+                    CandidatureServiceTest._training(code, level),
+                ]), patch("app.services.candidatures.service.require_site", return_value={"code": "dakar", "name": "Dakar"}), patch(
+                    "app.routes.candidature_routes.candidature_service", service,
+                ), patch("app.routes.candidature_routes.is_request_rate_limited", return_value=False):
+                    response = self.http.post("/api/candidature/apply", json=payload)
+                self.assertEqual(status, response.status_code)
+                if status == 400:
+                    self.assertIn(code, response.get_json()["error"])
+                    self.assertIn("à la date d'inscription", response.get_json()["error"])
+                    repository.create.assert_not_called()
+                    repository.save.assert_not_called()
+                    repository.find_by_email.assert_not_called()
+                    repository.find_by_identity_number.assert_not_called()
+                    repository.find_by_phone_and_birth_date.assert_not_called()
+                else:
+                    repository.create.assert_called_once()
+                    repository.save.assert_called_once()
 
 
 if __name__ == "__main__":
