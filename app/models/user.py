@@ -92,6 +92,7 @@ class User(db.Document):
 
     email = db.EmailField(required=True, unique=True)
     password_hash = db.StringField(required=True)  # Champ requis pour l'authentification email
+    password_session_version = db.StringField()
     first_name = db.StringField()
     last_name = db.StringField()
     
