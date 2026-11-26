@@ -97,7 +97,33 @@ def run_server():
         server.close()
 
 
+def start_embedded_email_worker():
+    """Local development only: deliver queued e-mails without a separate email_worker.py process.
+
+    Jobs are locked one at a time, so this thread can safely run next to a dedicated worker.
+    """
+    import threading
+    import time
+
+    from app.services.email_outbox import EmailOutbox
+
+    def deliver():
+        with app.app_context():
+            queue = EmailOutbox()
+            while True:
+                try:
+                    time.sleep(1 if queue.run_once() else 2)
+                except Exception:
+                    logger.exception("Envoi des e-mails temporairement indisponible")
+                    time.sleep(5)
+
+    threading.Thread(target=deliver, name="embedded-email-worker", daemon=True).start()
+    logger.info("Envoi des e-mails en file activé dans ce processus")
+
+
 if __name__ == "__main__":
+    if os.getenv("EMBEDDED_EMAIL_WORKER", "false").lower() == "true":
+        start_embedded_email_worker()
     try:
         run_server()
     except KeyboardInterrupt:
