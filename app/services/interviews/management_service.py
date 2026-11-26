@@ -3,8 +3,10 @@
 from datetime import datetime
 import secrets
 
+from bson import ObjectId
 from mongoengine.connection import ConnectionFailure
 
+from app.models.candidature_campaign import CandidatureCampaign
 from app.models.interview import InterviewSlot
 from app.models.user import User
 from app.repositories.interview_repository import InterviewRepository
@@ -45,10 +47,15 @@ class InterviewManagementService:
     def create_campaign(self, data):
         name = self._required_text(data, "name")
         formation = self._required_text(data, "formation")
-        require_training(formation)
+        training = require_training(formation)
+        source_id = data.get("candidature_campaign_id")
+        if source_id is not None:
+            formation = training["code"]
+            self.get_candidature_campaign(source_id, formation)
         campaign = self.repository.create_campaign(
             name=name,
             formation=formation,
+            candidature_campaign_id=source_id,
             description=(data.get("description") or "").strip(),
             status=data.get("status", "draft"),
             scorecard_config=get_default_scorecard_config(formation),
@@ -61,8 +68,14 @@ class InterviewManagementService:
         campaign = self.repository.get_campaign(campaign_id)
         if not campaign:
             raise InterviewNotFoundError("Campagne non trouvée")
+        if getattr(campaign, "referential_key", None):
+            raise InterviewConflictError("Modifiez les entretiens depuis le référentiel.")
 
         if "formation" in data and data["formation"] != campaign.formation:
+            if getattr(campaign, "candidature_campaign_id", None):
+                raise InterviewConflictError(
+                    "Le référentiel d'une campagne liée à des candidatures est fixe."
+                )
             require_training(data["formation"])
 
         for field in self.CAMPAIGN_UPDATE_FIELDS:
@@ -95,6 +108,21 @@ class InterviewManagementService:
         campaign.updated_at = self.now()
         return self.repository.save_campaign(campaign)
 
+    @staticmethod
+    def get_candidature_campaign(source_id, formation):
+        if not isinstance(source_id, str) or not ObjectId.is_valid(source_id):
+            raise InterviewValidationError("Sélectionnez une campagne de candidature valide.")
+        source = CandidatureCampaign.objects(
+            id=source_id,
+            formation__in=["all", formation],
+            status__in=["published", "archived"],
+        ).first()
+        if not source:
+            raise InterviewValidationError(
+                "La campagne de candidature doit être publiée ou archivée et couvrir ce référentiel."
+            )
+        return source
+
     def _can_manage_filter_questions(self, campaign, current_admin):
         if not current_admin:
             return False
@@ -126,6 +154,8 @@ class InterviewManagementService:
             raise InterviewValidationError(
                 f"Champs requis: {', '.join(missing_fields)}"
             )
+        if getattr(self.repository.get_campaign(data["campaign_id"]), "referential_key", None):
+            raise InterviewConflictError("Répartissez les candidats depuis le référentiel.")
 
         start_at = self.parse_datetime(data.get("start_at"), "start_at")
         end_at = self.parse_datetime(data.get("end_at"), "end_at")
@@ -167,6 +197,8 @@ class InterviewManagementService:
         slot = self.repository.get_slot(slot_id)
         if not slot:
             raise InterviewNotFoundError("Créneau non trouvé")
+        if getattr(self.repository.get_campaign(getattr(slot, "campaign_id", None)), "referential_key", None):
+            raise InterviewConflictError("Modifiez les entretiens depuis le référentiel.")
         previous_assignments = self._slot_user_roles(slot)
 
         for field in self.SLOT_UPDATE_FIELDS:

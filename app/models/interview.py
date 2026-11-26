@@ -14,6 +14,9 @@ from mongoengine import (
 class InterviewCampaign(Document):
     name = StringField(required=True)
     formation = StringField(required=True)
+    candidature_campaign_id = StringField()
+    referential_key = StringField(unique=True, sparse=True)
+    distribution = DictField(default=dict)
     description = StringField()
     status = StringField(
         default="draft",
@@ -21,6 +24,11 @@ class InterviewCampaign(Document):
     )
     scorecard_config = DictField(default=dict)
     filter_questions = ListField(DictField(), default=list)
+    question_bank = ListField(DictField(), default=list)
+    question_bank_revision = IntField(default=0)
+    questionnaire_config = DictField(default=dict)
+    preselection = DictField(default=dict)
+    final_results = DictField(default=dict)
     created_by = StringField()
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
@@ -35,11 +43,18 @@ class InterviewCampaign(Document):
         ],
     }
 
+    @property
+    def uses_questionnaire(self):
+        return bool(self.referential_key or self.candidature_campaign_id)
+
     def to_dict(self):
         return {
             "id": str(self.id),
             "name": self.name,
             "formation": self.formation,
+            "candidature_campaign_id": self.candidature_campaign_id,
+            "uses_questionnaire": self.uses_questionnaire,
+            "referential_key": self.referential_key,
             "description": self.description,
             "status": self.status,
             "scorecard_config": self.scorecard_config or {},
@@ -59,6 +74,7 @@ class InterviewSlot(Document):
     capacity = IntField(default=10)
     waiting_capacity = IntField(default=0)
     assignments = DictField(default=dict)
+    teams_url = StringField()
     availability_responses = DictField(default=dict)
     assigned_filter_ids = ListField(StringField(), default=list)
     assigned_jury_ids = ListField(StringField(), default=list)
@@ -98,6 +114,7 @@ class InterviewSlot(Document):
             "capacity": self.capacity,
             "waiting_capacity": self.waiting_capacity,
             "assignments": self.assignments or {},
+            "teams_url": self.teams_url,
             "availability_responses": self.availability_responses or {},
             "assigned_filter_ids": self.assigned_filter_ids or self.assigned_jury_ids or [],
             "assigned_jury_ids": self.assigned_jury_ids or self.assigned_filter_ids or [],
@@ -118,6 +135,9 @@ class InterviewEvaluation(Document):
     filter_review = DictField(default=dict)
     validator_review = DictField(default=dict)
     motivation_review = DictField(default=dict)
+    questionnaire = DictField(default=dict)
+    scheduled_at = DateTimeField()
+    scheduled_minutes = IntField()
     interview_progress_status = StringField(
         default="a_planifier",
         choices=[
@@ -204,6 +224,10 @@ class InterviewEvaluation(Document):
             "filter_review": self.filter_review or {},
             "validator_review": self.validator_review or {},
             "motivation_review": self.motivation_review or {},
+            "questionnaire_status": self.questionnaire.get("status"),
+            "questionnaire_scores": self.questionnaire.get("scores"),
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "scheduled_minutes": self.scheduled_minutes,
             "interview_progress_status": self.interview_progress_status,
             "final_status": self.final_status,
             "waiting_list_rank": self.waiting_list_rank,

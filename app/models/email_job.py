@@ -9,7 +9,8 @@ class EmailJob(Document):
     batch_key = StringField(required=True)
     kind = StringField(default="test_invitation", choices=[
         "test_invitation", "test_result", "candidature_confirmation",
-        "candidature_notification",
+        "candidature_notification", "interview_invitation", "interview_validator_schedule",
+        "bootcamp_invitation", "final_result",
     ])
     group_id = StringField(default="")
     candidate_id = StringField(required=True)
