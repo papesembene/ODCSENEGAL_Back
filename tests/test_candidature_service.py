@@ -39,7 +39,7 @@ class FakeRepository:
 
 class FakeCampaignService:
     def assert_open(self, _formation=None):
-        return None
+        return "campaign-id"
 
 
 class CandidatureServiceTest(unittest.TestCase):
@@ -56,6 +56,7 @@ class CandidatureServiceTest(unittest.TestCase):
 
         self.assertEqual("moussa@example.com", candidate.email)
         self.assertEqual("+221771234567", candidate.phone)
+        self.assertEqual("campaign-id", candidate.candidature_campaign_id)
 
     def test_current_age_rules_are_enforced_per_program_before_writes(self):
         cases = [

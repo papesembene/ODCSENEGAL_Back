@@ -55,18 +55,51 @@ class CandidatureCampaignService:
             "isOpen": data["isOpen"],
             "lifecycleStatus": data["lifecycleStatus"],
             "message": self._status_message(data),
-            "campaign": data,
+            "campaign": {
+                key: data[key] for key in (
+                    "id", "title", "promotion", "formation", "startAt", "endAt",
+                    "status", "lifecycleStatus", "isOpen",
+                )
+            },
         }
 
     def assert_open(self, formation=None):
         status = self.get_public_status(formation)
         if status["isOpen"]:
-            return
+            return status["campaign"]["id"]
         raise CandidatureCampaignServiceError(status["message"], 403)
+
+    @staticmethod
+    def _assert_no_overlap(values, exclude_id=None):
+        """Two published campaigns may not cover the same formation on overlapping dates.
+
+        Otherwise new applications silently go to the most recent one and the other looks open but stays empty.
+        A campaign for "all" formations overlaps every formation; different formations may run at the same time.
+        """
+        if values.get("status") != "published":
+            return
+        formation = values.get("formation") or "all"
+        query = CandidatureCampaign.objects(
+            status="published", start_at__lt=values["end_at"], end_at__gt=values["start_at"],
+        )
+        if formation != "all":
+            query = query.filter(formation__in=["all", formation])
+        if exclude_id is not None:
+            query = query.filter(id__ne=exclude_id)
+        other = query.order_by("start_at").first()
+        if other:
+            dates = f"du {other.start_at.strftime('%d/%m/%Y %H:%M')} au {other.end_at.strftime('%d/%m/%Y %H:%M')}"
+            scope = "toutes les formations" if other.formation == "all" else "cette formation"
+            raise CandidatureCampaignServiceError(
+                f"La campagne « {other.title} » est déjà publiée pour {scope} {dates}. "
+                "Changez les dates, la formation, ou archivez l’autre campagne avant de publier celle-ci.",
+                409,
+            )
 
     def create(self, data, admin_email=""):
         values = self._normalize_payload(data)
         self._validate(values)
+        self._assert_no_overlap(values)
         if values.get("formation", "all") != "all":
             require_training(values["formation"])
         values["created_by"] = admin_email or ""
@@ -98,6 +131,9 @@ class CandidatureCampaignService:
             **values,
         }
         self._validate(merged)
+        if set(values) & {"status", "start_at", "end_at", "formation"}:
+            # Renaming or describing a campaign never creates an overlap: only check when publication data changes.
+            self._assert_no_overlap(merged, exclude_id=campaign.id)
         if "formation" in values and values["formation"] != campaign.formation and values["formation"] != "all":
             require_training(values["formation"])
 
@@ -116,18 +152,14 @@ class CandidatureCampaignService:
 
     def find_current_or_next(self, formation=None):
         now = datetime.utcnow()
-        formation_values = ["all"]
+        filters = {"status": "published"}
         if formation:
-            formation_values.append(formation)
-
-        query = CandidatureCampaign.objects(
-            status="published",
-            formation__in=formation_values,
-        )
+            filters["formation__in"] = ["all", formation]
+        query = CandidatureCampaign.objects(**filters)
         open_campaign = query.filter(
             start_at__lte=now,
             end_at__gte=now,
-        ).order_by("end_at").first()
+        ).order_by(*(["-start_at", "-id"] if formation else ["end_at"])).first()
         if open_campaign:
             return open_campaign
 
@@ -162,7 +194,7 @@ class CandidatureCampaignService:
             if normalized_key not in cls.WRITABLE_FIELDS:
                 continue
             values[normalized_key] = cls._normalize_value(normalized_key, value)
-        if not values.get("formation"):
+        if "formation" in values and not values["formation"]:
             values["formation"] = "all"
         return values
 
