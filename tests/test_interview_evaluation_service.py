@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -63,6 +64,32 @@ class InterviewEvaluationServiceTest(unittest.TestCase):
 
         self.assertEqual(["slot-1"], [slot.id for slot in result])
         query.order_by.assert_called_once_with("start_at")
+
+    def test_linked_campaign_plans_only_eligible_candidates_without_test_results(self):
+        eligible = SimpleNamespace(status="pending", date_of_birth=date(2000, 6, 24), created_at=datetime(2026, 6, 24))
+        underage = SimpleNamespace(status="pending", date_of_birth=date(2010, 6, 24), created_at=eligible.created_at)
+        rejected = SimpleNamespace(status="rejected", date_of_birth=eligible.date_of_birth, created_at=eligible.created_at)
+        campaign = SimpleNamespace(candidature_campaign_id="source-id", scorecard_config={})
+        service = InterviewEvaluationService()
+        module = "app.services.interviews.evaluation_service"
+
+        with (
+            patch(f"{module}.InterviewCampaign.objects", return_value=Mock(first=Mock(return_value=campaign))),
+            patch(f"{module}.InterviewEvaluation.objects", return_value=[]),
+            patch(f"{module}.is_scorecard_ready", return_value=True),
+            patch(f"{module}.require_training", return_value={"level": "Âgé de 18 à 35 ans"}),
+            patch.object(service, "_planning_slots", return_value=[SimpleNamespace(id="slot-id")]),
+            patch.object(service, "_planning_candidates", return_value=[eligible, underage, rejected]),
+            patch.object(service, "_admitted_emails") as test_lookup,
+            patch.object(service, "_plan_candidate") as plan_candidate,
+        ):
+            counts = service.seed({"campaign_id": "interview-id", "formation": "data"})
+
+        test_lookup.assert_not_called()
+        plan_candidate.assert_called_once()
+        self.assertIs(eligible, plan_candidate.call_args.args[1])
+        self.assertEqual(1, counts["eligible_candidates"])
+        self.assertEqual(2, counts["not_admitted"])
 
     def test_member_cannot_edit_unassigned_evaluation(self):
         service = InterviewEvaluationService()

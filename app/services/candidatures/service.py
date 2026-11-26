@@ -81,7 +81,7 @@ class CandidatureService:
             now = now.replace(tzinfo=timezone.utc)
         now = now.astimezone(timezone.utc)
         birth_date = self._validate_submission(data, today=now.date())
-        training = self._assert_submission_open(data.get("desired_training"))
+        training, campaign_id = self._assert_submission_open(data.get("desired_training"))
         self._assert_age_eligible(training, birth_date, now.date())
         residence = canonical_residence(data.get("region_of_residence"))
         if not residence:
@@ -152,6 +152,7 @@ class CandidatureService:
             computer_skills=data["computer_skills"],
             available_for_10_months=data["available_for_10_months"],
             desired_training=data["desired_training"],
+            candidature_campaign_id=campaign_id,
             training_site=site["code"],
             training_site_name=site["name"],
             accept_conditions=data["accept_conditions"],
@@ -194,8 +195,8 @@ class CandidatureService:
     def _assert_submission_open(self, desired_training):
         try:
             training = require_training(desired_training, public=True)
-            self.campaign_service.assert_open(training["code"])
-            return training
+            campaign_id = self.campaign_service.assert_open(training["code"])
+            return training, campaign_id
         except (CandidatureCampaignServiceError, TrainingCatalogError) as error:
             raise CandidatureServiceError(str(error), error.status_code) from error
         except ValidationError as error:
@@ -273,8 +274,12 @@ class CandidatureService:
             ) from error
 
     def delete_candidature(self, candidature_id):
+        from app.services.candidatures.purge import purge_candidate_traces
+
         candidature = self.get_candidature(candidature_id)
         self.repository.delete(candidature)
+        # Interviews, pre-selection, Bootcamps and queued e-mails must not keep a ghost candidate.
+        purge_candidate_traces(candidature.id)
 
     def get_statistics(self, desired_training=None):
         candidatures = self.repository.list_for_training(desired_training)

@@ -1,11 +1,13 @@
 """Interview candidate planning and evaluation workflows."""
 
-from math import ceil
 from datetime import datetime
+from math import ceil
 
+from mongoengine import Q
 from mongoengine.errors import NotUniqueError
 
 from app.models.candidature import Candidature
+from app.models.candidature_campaign import CandidatureCampaign
 from app.repositories.candidature_filters import candidate_filter
 from app.models.interview import (
     InterviewCampaign,
@@ -13,6 +15,9 @@ from app.models.interview import (
     InterviewSlot,
 )
 from app.models.test_result import TestResult
+from app.services.interviews.management_service import InterviewManagementService
+from app.services.trainings.age_rules import midnight, parse_age_rule, rule_bounds
+from app.services.trainings.catalog import require_training
 from app.services.interviews.exceptions import (
     InterviewConflictError,
     InterviewForbiddenError,
@@ -53,7 +58,9 @@ class InterviewEvaluationService:
             raise InterviewNotFoundError(
                 "Campagne non trouvée pour ce référentiel"
             )
-        if not is_scorecard_ready(campaign.scorecard_config):
+        if getattr(campaign, "referential_key", None):
+            raise InterviewForbiddenError("Répartissez les candidats depuis le référentiel.")
+        if not campaign.candidature_campaign_id and not is_scorecard_ready(campaign.scorecard_config):
             raise InterviewValidationError(
                 "Ajoutez au moins un critère métier avant de planifier "
                 "les candidats."
@@ -65,15 +72,23 @@ class InterviewEvaluationService:
                 "Aucun créneau planifiable. Créez au moins un créneau "
                 "actif pour cette campagne."
             )
-        candidates = list(
-            Candidature.objects(
-                __raw__=candidate_filter({"desired_training": formation}),
-            ).order_by("created_at")
-        )
-        admitted_emails = self._admitted_emails(candidates)
+        candidates = self._planning_candidates(campaign)
+        candidate_count = len(candidates)
+        if campaign.candidature_campaign_id:
+            rule = parse_age_rule(require_training(formation).get("level"))
+            eligible_candidates = [
+                candidate for candidate in candidates
+                if self._is_direct_candidate_eligible(candidate, rule)
+            ]
+        else:
+            admitted_emails = self._admitted_emails(candidates)
+            eligible_candidates = [
+                candidate for candidate in candidates
+                if self.query_service.normalize_email(candidate.email) in admitted_emails
+            ]
         planning_limit = self._resolve_planning_limit(
             data.get("candidates_per_slot"),
-            admitted_count=len(admitted_emails),
+            admitted_count=len(eligible_candidates),
             slots_count=len(slots),
         )
         evaluations = {
@@ -88,20 +103,15 @@ class InterviewEvaluationService:
             "planned": 0,
             "already_planned": 0,
             "no_capacity": 0,
-            "not_admitted": 0,
+            "not_admitted": candidate_count - len(eligible_candidates),
             "planning_limit": planning_limit,
-            "eligible_candidates": len(admitted_emails),
+            "eligible_candidates": len(eligible_candidates),
             "available_slots": len(slots),
         }
 
-        for candidate in candidates:
-            if (
-                self.query_service.normalize_email(candidate.email)
-                not in admitted_emails
-            ):
-                counts["not_admitted"] += 1
-                continue
-            self._accept_pending_candidate(candidate)
+        for candidate in eligible_candidates:
+            if not campaign.candidature_campaign_id:
+                self._accept_pending_candidate(candidate)
             self._plan_candidate(
                 campaign_id,
                 candidate,
@@ -127,6 +137,8 @@ class InterviewEvaluationService:
         campaign = InterviewCampaign.objects(
             id=evaluation.campaign_id
         ).first()
+        if campaign and campaign.uses_questionnaire:
+            raise InterviewForbiddenError("Utilisez le questionnaire pour modifier cette évaluation.")
         scorecard = campaign.scorecard_config if campaign else {}
         sections = (scorecard or {}).get("sections") or {}
 
@@ -265,6 +277,47 @@ class InterviewEvaluationService:
             for result in results
             if result.candidate and result.candidate.email
         }
+
+    @staticmethod
+    def _planning_candidates(campaign):
+        query = Candidature.objects(
+            __raw__=candidate_filter({"desired_training": campaign.formation}),
+        ).order_by("created_at", "id")
+        if campaign.candidature_campaign_id:
+            source = InterviewManagementService.get_candidature_campaign(
+                campaign.candidature_campaign_id, campaign.formation,
+            )
+            historical = Q(
+                candidature_campaign_id=None,
+                created_at__gte=source.start_at,
+                created_at__lte=source.end_at,
+            )
+            overlaps = CandidatureCampaign.objects(
+                id__ne=source.id,
+                formation__in=["all", campaign.formation],
+                status__in=["published", "archived"],
+                start_at__lte=source.end_at,
+                end_at__gte=source.start_at,
+            ).only("start_at", "end_at")
+            for overlap in overlaps:
+                historical &= (
+                    Q(created_at__lt=overlap.start_at) | Q(created_at__gt=overlap.end_at)
+                )
+            query = query.filter(Q(candidature_campaign_id=str(source.id)) | historical)
+        return list(query)
+
+    @staticmethod
+    def _is_direct_candidate_eligible(candidate, rule):
+        if candidate.status == "rejected" or not candidate.date_of_birth:
+            return False
+        submission_day = candidate.created_at.date()
+        if candidate.date_of_birth > submission_day:
+            return False
+        if rule is None:
+            return True
+        lower, upper = rule_bounds(rule, submission_day)
+        birth = midnight(candidate.date_of_birth)
+        return (lower is None or lower <= birth) and birth < upper
 
     @staticmethod
     def _slot_occupancy(slots, evaluations):

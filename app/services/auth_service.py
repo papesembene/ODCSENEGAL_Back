@@ -136,6 +136,8 @@ class AuthService:
         'iss': current_app.config.get('JWT_ISSUER', 'your-app-name')
     }
 
+        if getattr(user, "password_session_version", None):
+            payload["password_session_version"] = user.password_session_version
         token = jwt.encode(payload, secret_key, algorithm='HS256')
 
         return {
@@ -162,6 +164,10 @@ class AuthService:
 
             if not user or not user.is_active:
                 raise Unauthorized("Utilisateur non trouvé ou inactif")
+
+            # Tokens issued before a password reset carry an outdated version and are refused.
+            if payload.get("password_session_version") != getattr(user, "password_session_version", None):
+                raise Unauthorized("Session expirée. Veuillez vous reconnecter.")
 
             return user
 

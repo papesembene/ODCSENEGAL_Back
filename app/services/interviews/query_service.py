@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from bson import ObjectId
 
 from app.models.candidature import Candidature
+from app.models.candidature_campaign import CandidatureCampaign
+from app.models.email_job import EmailJob
 from app.models.interview import (
     InterviewCampaign,
     InterviewEvaluation,
@@ -20,6 +22,11 @@ from app.models.user import User
 from app.services.interviews.access_policy import (
     is_interview_member, slot_access, utc_iso, visible_slots_condition,
 )
+from app.services.tests.formation_catalog import formation_aliases
+
+
+INVITATION_KIND = "interview_invitation"
+DIRECT_STATUSES = ("planned", "convened", "draft", "validated", "absent")
 
 
 class InterviewQueryService:
@@ -30,9 +37,7 @@ class InterviewQueryService:
         campaigns = list(self.list_campaign_documents(formation))
         campaign_ids = [str(item.id) for item in campaigns]
         slots_query = InterviewSlot.objects.order_by("start_at")
-        if formation:
-            slots_query = slots_query.filter(formation=formation)
-        if campaign_ids:
+        if formation or campaign_ids:
             slots_query = slots_query.filter(
                 campaign_id__in=campaign_ids
             )
@@ -97,8 +102,11 @@ class InterviewQueryService:
 
     @staticmethod
     def list_campaign_documents(formation=None):
-        query = InterviewCampaign.objects.order_by("-created_at")
-        return query.filter(formation=formation) if formation else query
+        query = InterviewCampaign.objects.order_by("-created_at", "-id")
+        if formation:
+            aliases = formation_aliases(formation)
+            return query.filter(formation__in=list(dict.fromkeys([*aliases, *(alias.lower() for alias in aliases)])))
+        return query
 
     def list_campaigns(self, formation=None, current_admin=None):
         campaigns = self.list_campaign_documents(formation)
@@ -140,6 +148,15 @@ class InterviewQueryService:
             request_args,
             current_admin=current_admin,
         )
+        direct_summary = None
+        direct_status = request_args.get("directStatus")
+        if request_args.get("directSummary") or direct_status in DIRECT_STATUSES:
+            groups = self._direct_status_groups(query)
+            direct_summary = {key: len(ids) for key, ids in groups.items()}
+            if direct_status in DIRECT_STATUSES:
+                query = query.filter(id__in=list(groups[direct_status]) or [ObjectId()])
+        if request_args.get("sort") == "schedule":
+            query = query.order_by("scheduled_at", "candidate_snapshot.last_name", "candidate_snapshot.first_name")
         total = query.count()
         total_pages = max((total + page_size - 1) // page_size, 1)
         page = min(page, total_pages)
@@ -147,8 +164,11 @@ class InterviewQueryService:
         statuses = ("en_attente", "retenu", "liste_attente", "rejete")
         progress_values = ("a_planifier", "planifie", "passe", "absent")
         complete = query.filter(is_complete=True).count()
+        data = self.serialize_evaluations(rows)
+        if direct_summary is not None:
+            self._attach_invitations(data)
         return {
-            "data": self.serialize_evaluations(rows),
+            "data": data,
             "pagination": {
                 "page": page,
                 "page_size": page_size,
@@ -168,6 +188,7 @@ class InterviewQueryService:
                 },
                 "complete": complete,
                 "incomplete": max(total - complete, 0),
+                **({"direct": direct_summary} if direct_summary is not None else {}),
                 "ready_for_decision": query.filter(
                     interview_progress_status="passe",
                     final_status="en_attente",
@@ -244,6 +265,14 @@ class InterviewQueryService:
         }
 
     @staticmethod
+    def candidate_details(candidate):
+        return {
+            field: getattr(candidate, field, None)
+            for field in ("education_level", "speciality", "current_structure", "region_of_residence",
+                          "training_site_name", "computer_skills", "available_for_10_months")
+        }
+
+    @staticmethod
     def serialize_admin_user(user):
         return {
             "id": str(user.id),
@@ -261,6 +290,10 @@ class InterviewQueryService:
         payload["evaluation_count"] = InterviewEvaluation.objects(
             campaign_id=str(campaign.id),
         ).count()
+        source_id = campaign.candidature_campaign_id
+        source = CandidatureCampaign.objects(id=source_id).only("status").first() if source_id and ObjectId.is_valid(source_id) else None
+        # Same rule as the questionnaire service: validators only read evaluations of an archived campaign.
+        payload["candidature_archived"] = bool(source and source.status == "archived")
         return payload
 
     @staticmethod
@@ -276,6 +309,41 @@ class InterviewQueryService:
 
         parsed_value = max(parsed_value, 1)
         return min(parsed_value, maximum) if maximum else parsed_value
+
+    @staticmethod
+    def _sent_invitations(pairs):
+        """(campaign_id, candidature_id) pairs whose interview invitation e-mail was accepted."""
+        if not pairs:
+            return set()
+        return {
+            (job.batch_key, job.candidate_id)
+            for job in EmailJob.objects(
+                kind=INVITATION_KIND, status="sent",
+                batch_key__in=list({campaign for campaign, _ in pairs}),
+                candidate_id__in=list({candidate for _, candidate in pairs}),
+            ).only("batch_key", "candidate_id")
+        }
+
+    def _direct_status_groups(self, query):
+        """Evaluation ids per direct-interview status, over the whole filtered set (not only one page)."""
+        groups = {key: set() for key in DIRECT_STATUSES}
+        waiting = []
+        for row in query.only("id", "campaign_id", "candidature_id", "questionnaire.status").as_pymongo():
+            status = (row.get("questionnaire") or {}).get("status")
+            if status in groups:
+                groups[status].add(row["_id"])
+            else:
+                waiting.append(row)
+        sent = self._sent_invitations([(row.get("campaign_id"), row.get("candidature_id")) for row in waiting])
+        for row in waiting:
+            key = "convened" if (row.get("campaign_id"), row.get("candidature_id")) in sent else "planned"
+            groups[key].add(row["_id"])
+        return groups
+
+    def _attach_invitations(self, payloads):
+        sent = self._sent_invitations([(item.get("campaign_id"), item.get("candidature_id")) for item in payloads])
+        for item in payloads:
+            item["invitation_sent"] = (item.get("campaign_id"), item.get("candidature_id")) in sent
 
     def build_evaluation_query(self, request_args, current_admin=None):
         campaign_id = request_args.get("campaignId")
@@ -372,10 +440,13 @@ class InterviewQueryService:
             str(candidate.id): candidate
             for candidate in candidates
         }
+        legacy_candidates = {
+            evaluation.candidature_id for evaluation in evaluation_list
+            if not getattr(campaigns_by_id.get(evaluation.campaign_id), "uses_questionnaire", False)
+        }
         candidate_emails = [
-            candidate.email
-            for candidate in candidates
-            if candidate.email
+            candidate.email for candidate_id, candidate in candidates_by_id.items()
+            if candidate_id in legacy_candidates and candidate.email
         ]
         test_results = (
             TestResult.objects(
@@ -429,6 +500,7 @@ class InterviewQueryService:
             campaign = campaigns_by_id.get(evaluation.campaign_id)
             slot = slots_by_id.get(evaluation.slot_id)
             payload["campaign_name"] = campaign.name if campaign else ""
+            payload["requires_online_test"] = not (campaign and campaign.uses_questionnaire)
             payload["campaign_scorecard_config"] = (
                 campaign.scorecard_config if campaign else {}
             )
@@ -441,11 +513,13 @@ class InterviewQueryService:
                 payload["candidate_snapshot"] = (
                     self.build_candidate_snapshot(candidate)
                 )
-            linked_result = test_results_by_email.get(
-                self.normalize_email(
-                    payload.get("candidate_snapshot", {}).get("email"),
-                ),
-            )
+            if not payload["requires_online_test"] and candidate:
+                payload["candidate_snapshot"].update(self.candidate_details(candidate))
+            linked_result = None
+            if payload["requires_online_test"]:
+                linked_result = test_results_by_email.get(
+                    self.normalize_email(payload.get("candidate_snapshot", {}).get("email")),
+                )
             payload["test_score"] = (
                 linked_result.score if linked_result else None
             )

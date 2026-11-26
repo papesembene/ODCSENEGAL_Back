@@ -25,6 +25,7 @@ class Candidature(Document):
     computer_skills = BooleanField(required=True)  # Notions en informatique (Oui/Non)
     available_for_10_months = BooleanField(required=True)  # Disponibilité pour 10 mois (Oui/Non)
     desired_training = StringField(required=True)  # Formation souhaitée
+    candidature_campaign_id = StringField()
     training_site = StringField(max_length=80, default="")
     training_site_name = StringField(max_length=120, default="")
     accept_conditions = BooleanField(required=True)  # Acceptation des conditions
@@ -55,6 +56,7 @@ class Candidature(Document):
             'status',
             '-created_at',
             {'fields': ['desired_training', '-created_at']},
+            {'fields': ['candidature_campaign_id', 'desired_training']},
             {'fields': ['status', '-created_at']},
             {'fields': ['desired_training', 'status', '-created_at']},
             {'fields': ['desired_training', 'email']},

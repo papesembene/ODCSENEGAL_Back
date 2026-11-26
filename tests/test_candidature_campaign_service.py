@@ -83,6 +83,47 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
         self.assertTrue(status["isOpen"])
         self.assertEqual("open", status["lifecycleStatus"])
 
+    def test_scoped_campaign_opens_homepage_and_only_its_formation(self):
+        service = CandidatureCampaignService()
+        scoped = self._campaign(
+            datetime(2026, 7, 1), datetime(2026, 7, 20), "dev-web-mobile",
+        )
+        expired = self._campaign(datetime(2026, 6, 1), datetime(2026, 6, 20))
+
+        def objects(status, formation__in=None):
+            return FakeQuery([
+                campaign for campaign in (scoped, expired)
+                if campaign.status == status
+                and (formation__in is None or campaign.formation in formation__in)
+            ])
+
+        with patch(
+            "app.services.candidatures.campaign_service.datetime",
+            SimpleNamespace(utcnow=lambda: datetime(2026, 7, 8, 10)),
+        ), patch(
+            "app.services.candidatures.campaign_service.CandidatureCampaign.objects",
+            side_effect=objects,
+        ):
+            summary = service.get_public_status()
+            self.assertTrue(summary["isOpen"])
+            self.assertEqual("dev-web-mobile", summary["campaign"]["formation"])
+            self.assertNotIn("description", summary["campaign"])
+            self.assertEqual(scoped.id, service.assert_open("dev-web-mobile"))
+            with self.assertRaises(CandidatureCampaignServiceError):
+                service.assert_open("data-ia")
+
+    def test_partial_update_preserves_campaign_formation(self):
+        service = CandidatureCampaignService()
+        campaign = self._campaign(
+            datetime(2026, 7, 1), datetime(2026, 7, 20), "dev-web-mobile",
+        )
+        campaign.save = lambda: None
+        with patch.object(service, "_get_document", return_value=campaign):
+            service.update(campaign.id, {"title": "Nouveau titre"})
+
+        self.assertEqual("Nouveau titre", campaign.title)
+        self.assertEqual("dev-web-mobile", campaign.formation)
+
     def test_public_status_uses_next_campaign_when_not_open_yet(self):
         service = CandidatureCampaignService()
         campaign = self._campaign(
@@ -154,14 +195,14 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
         self.assertEqual(upcoming.start_at.isoformat(), status["campaign"]["startAt"])
 
     @staticmethod
-    def _campaign(start_at, end_at):
+    def _campaign(start_at, end_at, formation="all"):
         now = datetime(2026, 7, 8, 10)
         lifecycle = "upcoming" if start_at > now else "closed" if end_at < now else "open"
         return SimpleNamespace(
             id="campaign-id",
             title="Promotion 2026",
             promotion="Promotion 2026",
-            formation="all",
+            formation=formation,
             start_at=start_at,
             end_at=end_at,
             status="published",
@@ -175,7 +216,7 @@ class CandidatureCampaignServiceTest(unittest.TestCase):
                 "id": "campaign-id",
                 "title": "Promotion 2026",
                 "promotion": "Promotion 2026",
-                "formation": "all",
+                "formation": formation,
                 "startAt": start_at.isoformat(),
                 "endAt": end_at.isoformat(),
                 "status": "published",

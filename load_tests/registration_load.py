@@ -133,6 +133,10 @@ def sample_resources(processes, stop, measurements):
         for label, process in processes.items():
             cpu, rss = 0., 0
             try:
+                if process is None:
+                    sample[label + "_cpu_percent"] = 0.
+                    sample[label + "_rss_mb"] = 0.
+                    continue
                 parent = psutil.Process(process.pid)
                 for item in [parent, *parent.children(recursive=True)]:
                     identity = (item.pid, item.create_time())
