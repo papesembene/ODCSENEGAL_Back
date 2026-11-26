@@ -144,6 +144,8 @@ def create_app(config_class=Config):
     app.register_blueprint(orangefab_bp, url_prefix='/api/orangefab')
     app.register_blueprint(test_violation_bp, url_prefix='/api/admin')
     app.register_blueprint(interview_bp, url_prefix='/api/admin')
+    from app.routes.bootcamp_routes import bootcamp_bp
+    app.register_blueprint(bootcamp_bp, url_prefix='/api/admin')
     app.register_blueprint(interview_public_bp, url_prefix='/api/interviews')
     app.register_blueprint(portal_content_bp, url_prefix='/api')
     app.register_blueprint(training_bp, url_prefix='/api')

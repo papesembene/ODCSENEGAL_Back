@@ -45,6 +45,9 @@ class EmailOutbox:
         from app.services.invitation_queue import InvitationQueue
         from app.services.result_notification_service import ResultNotificationService
         from app.services.candidature_notification_service import CandidatureNotificationService
+        from app.services.interviews.referential_service import InterviewInvitationOutbox, ValidatorScheduleOutbox
+        from app.services.bootcamps.service import BootcampInvitationOutbox
+        from app.services.bootcamps.results_service import FinalResultOutbox
 
         now = self.now()
         EmailJob.objects(status="sending", locked_until__lte=now, attempts__gte=self.max_attempts).update(
@@ -64,6 +67,10 @@ class EmailOutbox:
             "test_result": ResultNotificationService,
             "candidature_confirmation": CandidatureNotificationService,
             "candidature_notification": CandidatureNotificationService,
+            "interview_invitation": InterviewInvitationOutbox,
+            "interview_validator_schedule": ValidatorScheduleOutbox,
+            "bootcamp_invitation": BootcampInvitationOutbox,
+            "final_result": FinalResultOutbox,
         }
         handler = handlers.get(job.kind, InvitationQueue)
         try:
